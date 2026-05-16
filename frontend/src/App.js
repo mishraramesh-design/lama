@@ -7,6 +7,7 @@ import Sidebar from "@/components/Sidebar";
 import DiscoveryPage from "@/pages/Discovery";
 import PromptLibraryPage from "@/pages/PromptLibrary";
 import AuditLogPage from "@/pages/AuditLog";
+import GitHubSettingsPage from "@/pages/GitHubSettings";
 
 function Shell({ children }) {
   return (
@@ -25,6 +26,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Shell><DiscoveryPage /></Shell>} />
           <Route path="/prompts" element={<Shell><PromptLibraryPage /></Shell>} />
+          <Route path="/settings" element={<Shell><GitHubSettingsPage /></Shell>} />
           <Route path="/audit" element={<Shell><AuditLogPage /></Shell>} />
         </Routes>
       </BrowserRouter>

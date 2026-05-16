@@ -7,10 +7,11 @@ const api = axios.create({ baseURL: API, timeout: 120000 });
 
 // Projects
 export const listProjects = () => api.get("/projects").then((r) => r.data);
-export const createProject = (payload) => api.post("/projects", payload).then((r) => r.data);
 export const getProject = (id) => api.get(`/projects/${id}`).then((r) => r.data);
 
 // KB
+export const scanFolder = (projectId, folderPath) =>
+  api.post("/kb/scan-folder", { project_id: projectId, folder_path: folderPath }).then((r) => r.data);
 export const uploadKBFiles = (projectId, files) => {
   const fd = new FormData();
   fd.append("project_id", projectId);

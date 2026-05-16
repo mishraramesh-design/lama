@@ -27,8 +27,8 @@ async def chat_completion(
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://migrationos.local",
-        "X-Title": "MigrationOS",
+        "HTTP-Referer": "https://lama.local",
+        "X-Title": "LAMA",
     }
     payload = {
         "model": model,

@@ -94,7 +94,7 @@ async def seed_pilot_project():
         "name": "PMIS Migration Pilot",
         "source_tech": "PHP 8 / CodeIgniter 4 / MariaDB",
         "target_tech": "FastAPI / Python 3.12 / PostgreSQL",
-        "description": "Pilot migration project for the PMIS legacy system.",
+        "description": "LAMA pilot — PHP 8 / CodeIgniter 4 / MariaDB monolith migrating to FastAPI / Python 3.12 / PostgreSQL",
         "github_repo": "",
         "stage": "Discovery",
         "stage_status": {

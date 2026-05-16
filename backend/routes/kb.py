@@ -1,4 +1,6 @@
-"""Knowledge Base endpoints: upload, build, status."""
+"""Knowledge Base endpoints: upload, build, status, scan-folder."""
+import os
+import re
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import List
 from datetime import datetime, timezone
@@ -10,6 +12,95 @@ from kb.owl_extractor import extract, aggregate_stats
 from kb.toon import serialise, summarise
 
 router = APIRouter(prefix="/kb", tags=["kb"])
+
+ALLOWED_EXTS = {".php", ".sql", ".pdf", ".csv", ".docx", ".txt", ".md", ".zip"}
+SKIP_DIRS = {"node_modules", ".git", "vendor", "__pycache__", ".idea", ".vscode", "dist", "build"}
+SKIP_FILE_PATTERNS = [
+    re.compile(r"\.bak$", re.IGNORECASE),
+    re.compile(r"\.save$", re.IGNORECASE),
+    re.compile(r"_(bkp|old|backup)", re.IGNORECASE),
+    re.compile(r"\.php_", re.IGNORECASE),  # AirtelApi.php_03Mar2025
+]
+
+
+def _should_skip_file(name: str) -> bool:
+    return any(p.search(name) for p in SKIP_FILE_PATTERNS)
+
+
+@router.post("/scan-folder")
+async def scan_folder(payload: dict):
+    """Walk a folder on the server filesystem and ingest all supported files."""
+    project_id = payload.get("project_id")
+    folder = payload.get("folder_path", "").strip()
+    if not project_id:
+        raise HTTPException(400, "project_id required")
+    if not folder:
+        raise HTTPException(400, "folder_path required")
+
+    if not os.path.isdir(folder):
+        raise HTTPException(400, f"Path does not exist or is not a directory: {folder}")
+
+    proj = await projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    processed: list[str] = []
+    skipped: list[str] = []
+
+    for root, dirs, files in os.walk(folder):
+        # prune skipped directories in-place
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for f in files:
+            full = os.path.join(root, f)
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in ALLOWED_EXTS:
+                continue
+            if _should_skip_file(f):
+                skipped.append(f)
+                continue
+            try:
+                with open(full, "rb") as fh:
+                    content = fh.read()
+            except Exception:
+                skipped.append(f)
+                continue
+
+            filetype, text = parse_file(f, content)
+            chunks = chunk_text(text)
+
+            kb_file = KBFile(
+                project_id=project_id,
+                filename=os.path.relpath(full, folder),
+                filetype=filetype,
+                size=len(content),
+                chunk_count=len(chunks),
+                status="uploaded",
+            )
+            await kb_files.insert_one(kb_file.model_dump())
+
+            if chunks:
+                chunk_docs = [
+                    {
+                        "id": f"{kb_file.id}:{i}",
+                        "project_id": project_id,
+                        "file_id": kb_file.id,
+                        "chunk_index": i,
+                        "content": c,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    for i, c in enumerate(chunks)
+                ]
+                await kb_chunks.insert_many(chunk_docs)
+
+            processed.append(kb_file.filename)
+
+    return {
+        "ok": True,
+        "scanned": len(processed),
+        "skipped": len(skipped),
+        "files": processed,
+        "skipped_files": skipped[:50],
+    }
 
 
 @router.post("/upload")

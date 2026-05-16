@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Upload, FileText, Trash2, Hammer, Database, Boxes, Users, GitBranch } from "lucide-react";
-import { uploadKBFiles, listKBFiles, deleteKBFile, buildKB, kbStatus } from "@/lib/api";
+import { Upload, FileText, Trash2, Hammer, Database, Boxes, Users, GitBranch, FolderSearch } from "lucide-react";
+import { uploadKBFiles, listKBFiles, deleteKBFile, buildKB, kbStatus, scanFolder } from "@/lib/api";
 import HelpIcon from "@/components/HelpIcon";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-const ACCEPT = ".php,.sql,.pdf,.csv,.docx,.txt,.md";
+const ACCEPT = ".php,.sql,.pdf,.csv,.docx,.txt,.md,.zip";
 
 function MetricCard({ icon: Icon, label, value, testId, help }) {
   return (
@@ -28,6 +29,8 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
   const [uploading, setUploading] = useState(false);
   const [building, setBuilding] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [folderPath, setFolderPath] = useState("");
+  const [scanning, setScanning] = useState(false);
   const inputRef = useRef(null);
 
   const refresh = useCallback(async () => {
@@ -70,6 +73,23 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
     }
   };
 
+  const handleScanFolder = async () => {
+    if (!folderPath.trim()) {
+      toast.error("Enter a folder path");
+      return;
+    }
+    setScanning(true);
+    try {
+      const r = await scanFolder(projectId, folderPath.trim());
+      toast.success(`Scanned ${r.scanned} file(s)`, { description: r.skipped ? `${r.skipped} skipped` : undefined });
+      await refresh();
+    } catch (e) {
+      toast.error("Scan failed", { description: e.response?.data?.detail || e.message });
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const handleDelete = async (id) => {
     await deleteKBFile(id);
     toast.success("File deleted");
@@ -78,15 +98,44 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
 
   return (
     <div className="h-full flex flex-col gap-4 overflow-hidden">
-      {/* Dropzone */}
+      {/* Source ingest */}
       <div className="mos-panel p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-display text-sm font-bold tracking-tight flex items-center">
             Source Files
-            <HelpIcon text="Upload legacy code (.php, .sql), docs (.pdf, .docx), or data (.csv). MigrationOS chunks them and extracts an ontology." testId="help-upload" />
+            <HelpIcon text="Ingest legacy code by entering the absolute folder path on the server (recommended for large codebases) or by drag-dropping individual files." testId="help-upload" />
           </h3>
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">{files.length} files</span>
         </div>
+
+        {/* Mode A — Folder path */}
+        <div className="mb-3">
+          <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center mb-1">
+            <FolderSearch className="w-3 h-3 mr-1" />
+            Legacy codebase folder path
+            <HelpIcon text="Enter the absolute path to your legacy application folder on the server. LAMA will scan all .php, .sql, .pdf, .csv, .docx, .txt, .md files recursively. node_modules, .git, vendor, backups (*.bak, *.save, *_bkp, *.php_*) are skipped." testId="help-folder-path" />
+          </label>
+          <div className="flex gap-2">
+            <Input
+              data-testid="folder-path-input"
+              value={folderPath}
+              onChange={(e) => setFolderPath(e.target.value)}
+              placeholder="/home/user/projects/pmis  or  C:\projects\pmis"
+              className="flex-1 rounded-sm font-mono text-xs"
+            />
+            <Button
+              data-testid="scan-folder-btn"
+              onClick={handleScanFolder}
+              disabled={scanning || !folderPath.trim()}
+              className="bg-[#0A2540] text-white hover:bg-[#021122] rounded-sm text-xs h-9 px-3 whitespace-nowrap"
+            >
+              {scanning ? "Scanning…" : "Scan Folder"}
+            </Button>
+          </div>
+        </div>
+
+        {/* Mode B — Individual file upload */}
+        <div className="mos-label mb-1.5">Or upload individual files</div>
         <div
           data-testid="dropzone"
           onClick={() => inputRef.current?.click()}
@@ -97,13 +146,13 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
             setDragOver(false);
             handleUpload(e.dataTransfer.files);
           }}
-          className={`border-2 border-dashed rounded-sm py-6 px-4 text-center cursor-pointer ${
+          className={`border-2 border-dashed rounded-sm py-4 px-4 text-center cursor-pointer ${
             dragOver ? "border-[#0A2540] bg-slate-50" : "border-slate-300 hover:border-slate-400"
           }`}
         >
-          <Upload className="w-5 h-5 mx-auto text-slate-500 mb-2" />
-          <div className="text-sm text-slate-700 font-medium">{uploading ? "Uploading…" : "Drop files or click to browse"}</div>
-          <div className="text-[11px] text-slate-500 mt-1">Accepts: .php, .sql, .pdf, .docx, .csv, .txt</div>
+          <Upload className="w-4 h-4 mx-auto text-slate-500 mb-1" />
+          <div className="text-xs text-slate-700 font-medium">{uploading ? "Uploading…" : "Drop files or click to browse"}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">.php · .sql · .pdf · .docx · .csv · .txt · .zip</div>
           <input
             ref={inputRef}
             type="file"
@@ -163,7 +212,7 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
       <div className="mos-panel p-4">
         <div className="mos-label mb-2 flex items-center">
           KB Health
-          <HelpIcon text="After Build, MigrationOS extracts classes, methods, tables, columns, FKs, roles, and routes from your sources." testId="help-kbhealth" />
+          <HelpIcon text="After Build, LAMA extracts classes, methods, tables, columns, FKs, roles, and routes from your sources." testId="help-kbhealth" />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <MetricCard icon={Boxes} label="Entities" value={status?.entities} testId="metric-entities" help="Total ontology entities (classes + tables + routes + individuals)." />

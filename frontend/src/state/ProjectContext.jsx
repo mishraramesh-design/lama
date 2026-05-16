@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { listProjects, createProject as apiCreateProject } from "@/lib/api";
+import { listProjects } from "@/lib/api";
 
 const ProjectContext = createContext(null);
 
@@ -26,17 +26,10 @@ export function ProjectProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const create = async (payload) => {
-    const p = await apiCreateProject(payload);
-    await refresh();
-    setActiveId(p.id);
-    return p;
-  };
-
   const active = projects.find((p) => p.id === activeId) || null;
 
   return (
-    <ProjectContext.Provider value={{ projects, active, activeId, setActiveId, refresh, create, loading }}>
+    <ProjectContext.Provider value={{ projects, active, activeId, setActiveId, refresh, loading }}>
       {children}
     </ProjectContext.Provider>
   );

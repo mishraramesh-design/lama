@@ -10,6 +10,68 @@ from llm import chat_completion, estimate_tokens, AVAILABLE_MODELS
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+SRS_GENERATE_TRIGGERS = [
+    "generate srs", "create srs", "write srs", "produce srs",
+    "generate the srs", "create the document", "i have enough",
+    "ready to generate", "generate requirements document",
+]
+
+
+def detect_intent(message: str) -> str:
+    """Classify the user's intent. Returns 'srs.generate' or 'srs.gap_question'."""
+    msg = (message or "").lower()
+    if any(t in msg for t in SRS_GENERATE_TRIGGERS):
+        return "srs.generate"
+    return "srs.gap_question"
+
+
+def prune_toon(toon: str, max_chars: int, stage: str) -> str:
+    """Stage-aware token-efficient pruning of the TOON context."""
+    if not toon:
+        return ""
+    if len(toon) <= max_chars:
+        return toon
+
+    lines = toon.split("\n")
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in lines:
+        if line.startswith("# "):
+            current = line[2:].strip().split()[0]
+            sections.setdefault(current, [])
+        elif current:
+            sections[current].append(line)
+
+    stage_l = (stage or "").lower()
+    if stage_l == "discovery":
+        order = ["CLASSES", "ROUTES", "INDIVIDUALS", "TABLES"]
+    elif stage_l == "datamodel":
+        order = ["TABLES", "CLASSES", "ROUTES", "INDIVIDUALS"]
+    else:
+        order = ["ROUTES", "CLASSES", "TABLES", "INDIVIDUALS"]
+
+    result: list[str] = []
+    total = 0
+    for key in order:
+        if key not in sections:
+            continue
+        if key == "TABLES" and stage_l != "datamodel":
+            table_lines = [ln for ln in sections[key] if ln.startswith("[TABLE:")]
+            block = "# TABLES (names only)\n" + "\n".join(table_lines)
+        else:
+            block = f"# {key}\n" + "\n".join(sections[key])
+
+        if total + len(block) > max_chars:
+            remaining = max_chars - total
+            if remaining > 200:
+                result.append(block[:remaining] + "\n...[truncated]")
+            break
+        result.append(block)
+        total += len(block)
+
+    return "\n".join(result)
+
+
 async def _get_prompt(project_id: str, key: str) -> str:
     """Fetch effective prompt (project override -> global)."""
     p = await project_prompts.find_one({"project_id": project_id, "key": key}, {"_id": 0})
@@ -46,15 +108,16 @@ async def send_message(req: ChatRequest):
     toon_context = (toon_doc or {}).get("toon", "")
     summary = (toon_doc or {}).get("summary", "Knowledge base is empty.")
 
-    # Load conversation history (last 20 messages)
+    # Load conversation history (last 40 messages)
     history = await messages.find(
         {"conversation_id": conversation_id},
         {"_id": 0},
     ).sort("created_at", 1).to_list(40)
 
-    # Resolve prompt for the stage
+    # Resolve prompt for the stage (with intent detection in Discovery)
     stage = (req.stage or "Discovery").lower()
-    prompt_key = "srs.gap_question" if stage == "discovery" else f"{stage}.system"
+    intent = detect_intent(req.message) if stage == "discovery" else None
+    prompt_key = intent if stage == "discovery" else f"{stage}.system"
     system_template = await _get_prompt(req.project_id, prompt_key)
     if not system_template:
         system_template = (
@@ -71,7 +134,7 @@ async def send_message(req: ChatRequest):
     system_message = system_template.format(
         project_name=proj.get("name", ""),
         summary=summary,
-        toon_context=toon_context[:8000],
+        toon_context=prune_toon(toon_context, 12000, req.stage),
         conversation="",
         asked_questions=asked_questions or "(none yet)",
     )
@@ -121,8 +184,20 @@ async def send_message(req: ChatRequest):
         upsert=True,
     )
 
+    # Auto-trigger SRS generation when user asks for it
+    srs_triggered = False
+    if intent == "srs.generate":
+        try:
+            from routes.srs import generate_srs as _gen_srs
+            await _gen_srs({"project_id": req.project_id, "conversation_id": conversation_id, "model": req.model})
+            srs_triggered = True
+        except Exception:
+            srs_triggered = False
+
     return {
         "conversation_id": conversation_id,
         "message": assistant_msg.model_dump(),
         "usage": result["usage"],
+        "intent": intent,
+        "srs_triggered": srs_triggered,
     }

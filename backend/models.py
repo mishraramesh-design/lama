@@ -1,4 +1,4 @@
-"""Pydantic models for MigrationOS."""
+"""Pydantic models for LAMA."""
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone

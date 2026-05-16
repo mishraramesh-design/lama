@@ -8,8 +8,14 @@ export default function DiscoveryPage() {
   const { active } = useProjects();
   const [kbStatus, setKbStatus] = useState(null);
   const [conversationId, setConversationId] = useState(null);
+  const [srsRefreshKey, setSrsRefreshKey] = useState(0);
 
   const kbReady = (kbStatus?.entities || 0) > 0;
+
+  const handleConversationUpdated = (cid, srsTriggered) => {
+    setConversationId(cid);
+    if (srsTriggered) setSrsRefreshKey((k) => k + 1);
+  };
 
   if (!active) {
     return (
@@ -42,10 +48,10 @@ export default function DiscoveryPage() {
           <UploadPanel projectId={active.id} onKBUpdated={setKbStatus} />
         </div>
         <div className="col-span-5 min-h-0" data-testid="panel-chat">
-          <ChatPanel projectId={active.id} kbReady={kbReady} onConversationUpdated={setConversationId} />
+          <ChatPanel projectId={active.id} kbReady={kbReady} onConversationUpdated={handleConversationUpdated} />
         </div>
         <div className="col-span-4 min-h-0" data-testid="panel-srs">
-          <SRSPanel projectId={active.id} conversationId={conversationId} kbReady={kbReady} />
+          <SRSPanel key={srsRefreshKey} projectId={active.id} conversationId={conversationId} kbReady={kbReady} />
         </div>
       </div>
     </div>

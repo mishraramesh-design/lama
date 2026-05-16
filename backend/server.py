@@ -1,4 +1,4 @@
-"""MigrationOS FastAPI entrypoint."""
+"""LAMA — Legacy Application Modernization & Alignment — FastAPI entrypoint."""
 from fastapi import FastAPI, APIRouter
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -21,13 +21,13 @@ from routes.audit import router as audit_router  # noqa: E402
 from seed import run_seed  # noqa: E402
 
 
-app = FastAPI(title="MigrationOS API", version="0.1.0")
+app = FastAPI(title="LAMA API", version="0.2.0")
 api_router = APIRouter(prefix="/api")
 
 
 @api_router.get("/")
 async def root():
-    return {"service": "MigrationOS", "status": "ok"}
+    return {"service": "LAMA", "status": "ok"}
 
 
 @api_router.get("/health")
@@ -55,7 +55,7 @@ app.add_middleware(
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("migrationos")
+logger = logging.getLogger("lama")
 
 
 @app.on_event("startup")

@@ -67,7 +67,7 @@ export default function ChatPanel({ projectId, kbReady, onConversationUpdated })
       setConversationId(r.conversation_id);
       setHistory((h) => [...h, r.message]);
       setTokens((t) => t + (r.usage?.total_tokens || 0));
-      onConversationUpdated?.(r.conversation_id);
+      onConversationUpdated?.(r.conversation_id, r.srs_triggered);
     } catch (e) {
       toast.error("Chat failed", { description: e.response?.data?.detail || e.message });
       setHistory((h) => h.slice(0, -1));

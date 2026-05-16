@@ -1,6 +1,7 @@
-"""File parsers: extract text from PHP / SQL / PDF / DOCX / CSV / TXT."""
+"""File parsers: extract text from PHP / SQL / PDF / DOCX / CSV / TXT / ZIP."""
 import io
 import csv
+import zipfile
 from typing import Optional
 
 
@@ -51,7 +52,35 @@ def parse_docx(content: bytes) -> str:
         return f"[DOCX parse error: {e}]"
 
 
-def parse_file(filename: str, content: bytes) -> tuple[str, str]:
+def parse_zip(content: bytes) -> str:
+    """Extract a .zip in memory and concatenate text from all supported members."""
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except Exception as e:
+        return f"[ZIP open error: {e}]"
+
+    parts: list[str] = []
+    for name in zf.namelist():
+        if name.endswith("/"):
+            continue
+        # skip junk + nested zips (avoid recursion bombs)
+        lower = name.lower()
+        if any(skip in lower for skip in ["__macosx", ".ds_store", "node_modules/", ".git/", "vendor/", "__pycache__/"]):
+            continue
+        if lower.endswith(".zip"):
+            continue
+        try:
+            data = zf.read(name)
+        except Exception:
+            continue
+        # recurse via parse_file but avoid re-zip
+        _ftype, text = parse_file(name, data, allow_zip_recurse=False)
+        if text.strip():
+            parts.append(f"\n===== FILE: {name} =====\n{text}")
+    return "\n".join(parts)
+
+
+def parse_file(filename: str, content: bytes, allow_zip_recurse: bool = True) -> tuple[str, str]:
     """Returns (filetype, extracted_text)."""
     name = filename.lower()
     if name.endswith(".php"):
@@ -66,6 +95,8 @@ def parse_file(filename: str, content: bytes) -> tuple[str, str]:
         return "csv", parse_csv(content)
     if name.endswith((".txt", ".md")):
         return "txt", parse_txt(content)
+    if name.endswith(".zip") and allow_zip_recurse:
+        return "zip", parse_zip(content)
     # Default: treat as text
     return "txt", parse_txt(content)
 

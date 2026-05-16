@@ -43,7 +43,7 @@ code, pre, .font-mono {
   font-family: "IBM Plex Mono", Menlo, monospace;
 }
 
-/* Shadcn light theme tokens, mapped to MigrationOS palette */
+/* Shadcn light theme tokens, mapped to LAMA palette */
 @layer base {
   :root {
     --background: 210 40% 98%;

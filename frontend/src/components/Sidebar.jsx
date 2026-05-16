@@ -1,12 +1,8 @@
-import React, { useState } from "react";
+import React from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Lock, CheckCircle2, Circle, Library, BookOpen, Database, Boxes, Code2, Activity, Plus, FolderKanban } from "lucide-react";
+import { Lock, CheckCircle2, Circle, Library, BookOpen, Database, Boxes, Code2, Activity, Settings as SettingsIcon } from "lucide-react";
 import { useProjects } from "@/state/ProjectContext";
 import HelpIcon from "@/components/HelpIcon";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 const STAGES = [
@@ -20,99 +16,33 @@ const STAGES = [
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { projects, activeId, setActiveId, active, create } = useProjects();
-  const [newOpen, setNewOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", source_tech: "", target_tech: "" });
-
-  const onCreate = async () => {
-    if (!form.name) {
-      toast.error("Project name required");
-      return;
-    }
-    try {
-      await create(form);
-      toast.success("Project created");
-      setNewOpen(false);
-      setForm({ name: "", source_tech: "", target_tech: "" });
-    } catch (e) {
-      toast.error("Failed to create project");
-    }
-  };
+  const { active } = useProjects();
 
   return (
     <aside
       data-testid="sidebar"
       className="w-[260px] shrink-0 h-screen flex flex-col bg-white border-r border-slate-300"
     >
-      {/* Brand */}
+      {/* Brand + Project (static, single-tenant) */}
       <div className="px-5 py-5 border-b border-slate-300">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-[#0A2540] text-white flex items-center justify-center rounded-sm font-display font-bold">
-            M
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-9 h-9 bg-[#0A2540] text-white flex items-center justify-center rounded-sm font-display font-bold text-base">
+            L
           </div>
           <div>
-            <div className="font-display font-bold text-[15px] leading-tight tracking-tight">MigrationOS</div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-500">Legacy → Modern</div>
+            <div className="font-display font-bold text-xl leading-none tracking-tight text-[#0A2540]" data-testid="brand-name">LAMA</div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-500 mt-1 leading-tight">Legacy Application<br/>Modernization &amp; Alignment</div>
           </div>
         </div>
-      </div>
-
-      {/* Project switcher */}
-      <div className="px-4 py-4 border-b border-slate-300">
-        <div className="flex items-center justify-between mb-2">
-          <span className="mos-label flex items-center">
-            <FolderKanban className="w-3 h-3 mr-1" />
-            Project
-            <HelpIcon text="Switch between migration projects. Each project has its own KB, SRS, and prompts." testId="help-project-switcher" />
-          </span>
-          <Dialog open={newOpen} onOpenChange={setNewOpen}>
-            <DialogTrigger asChild>
-              <button
-                data-testid="new-project-btn"
-                className="text-slate-500 hover:text-[#0A2540]"
-                aria-label="New project"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </DialogTrigger>
-            <DialogContent data-testid="new-project-dialog">
-              <DialogHeader>
-                <DialogTitle>New Migration Project</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-3">
-                <div>
-                  <Label htmlFor="np-name">Name</Label>
-                  <Input id="np-name" data-testid="np-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-                </div>
-                <div>
-                  <Label htmlFor="np-source">Source Tech</Label>
-                  <Input id="np-source" data-testid="np-source" placeholder="PHP 8 / CodeIgniter 4 / MariaDB" value={form.source_tech} onChange={(e) => setForm({ ...form, source_tech: e.target.value })} />
-                </div>
-                <div>
-                  <Label htmlFor="np-target">Target Tech</Label>
-                  <Input id="np-target" data-testid="np-target" placeholder="FastAPI / Python 3.12 / PostgreSQL" value={form.target_tech} onChange={(e) => setForm({ ...form, target_tech: e.target.value })} />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button data-testid="np-submit" onClick={onCreate}>Create Project</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-        <select
-          data-testid="project-selector"
-          value={activeId || ""}
-          onChange={(e) => setActiveId(e.target.value)}
-          className="w-full bg-white border border-slate-300 rounded-sm px-2 py-2 text-sm focus:border-[#0A2540] focus:ring-1 focus:ring-[#0A2540] outline-none"
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
         {active && (
-          <div className="mt-2 text-[11px] text-slate-500 leading-snug">
-            <div><span className="font-medium text-slate-700">Source:</span> {active.source_tech}</div>
-            <div><span className="font-medium text-slate-700">Target:</span> {active.target_tech}</div>
+          <div data-testid="active-project-header">
+            <div className="mos-label">Project</div>
+            <div className="font-display font-bold text-sm text-slate-900 leading-tight mt-0.5" data-testid="active-project-name">{active.name}</div>
+            <div className="text-[11px] text-slate-500 mt-1 leading-snug" data-testid="active-project-tech">
+              {active.source_tech}
+              <br />
+              <span className="text-slate-400">→</span> {active.target_tech}
+            </div>
           </div>
         )}
       </div>
@@ -180,6 +110,17 @@ export default function Sidebar() {
           <Library className="w-4 h-4" />
           Prompt Library
           <HelpIcon text="Global system prompts (admin) and per-project overrides for each stage." testId="help-prompts" />
+        </button>
+        <button
+          data-testid="nav-settings"
+          onClick={() => navigate("/settings")}
+          className={`w-full flex items-center gap-2 px-2 py-2 rounded-sm text-[13px] ${
+            location.pathname === "/settings" ? "bg-slate-100 text-[#0A2540] font-semibold" : "text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <SettingsIcon className="w-4 h-4" />
+          Settings &amp; GitHub
+          <HelpIcon text="Configure GitHub repository and access token for pushing generated code." testId="help-settings" />
         </button>
         <button
           data-testid="nav-audit"
