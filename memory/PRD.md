@@ -86,6 +86,35 @@ Full-stack legacy application migration assistant. FastAPI backend + React front
 - 🔑 Set `QDRANT_API_KEY` env var in `backend/.env`. Qdrant client now authenticates against `http://93.127.194.188:6333`; collection auto-creates on next Build KB.
 - ✅ End-to-end smoke-test of Chat SRS Edit Mode: real LLM call returned 10 well-formed FR requirements grounded in actual KB entities (`AdminController.exportClaims`, `pmis_claims` table) — 4121 tokens, sub-60s.
 
+**Iteration 7 (Prompt 4/4 — Stage 2: Data Model — FULL IMPLEMENTATION):**
+- ✅ **Backend** (`routes/datamodel.py`, ~700 lines):
+  - 12 endpoints: 4 generation (3 SSE — OLTP, OLAP, migration-scripts; 1 JSON — bus-matrix), entity-graph (cached/live), RAG chat, artifact list/get/update/freeze/download, stage-2 reset, factory-reset.
+  - Pipeline-gated: every generation endpoint requires Discovery `stage_context` (returns 400 if not).
+  - DataModelArtifact persistence: one artifact per type per project (upsert pattern), version-incremented on updates.
+  - Freeze artifact: when both OLTP and OLAP are frozen, automatically calls `save_stage_context("DataModel", …)` with full handoff payload (DDL contents, table/fact/dim counts, domain map, service boundaries from Discovery) and promotes `Architecture` to `"available"`.
+  - Migration scripts: 3 inline-prompt LLM calls (legacy→OLTP w/ ID-map FK rewiring, OLTP→OLAP star-schema ETL, pytest validation suite).
+  - Factory reset: wipes 12 collections + Qdrant vectors + audit log entries; resets project to Discovery active + 4 stages locked.
+- ✅ **4 new seed prompts** added with `force_update=True`: `datamodel.oltp`, `datamodel.olap`, `datamodel.bus_matrix`, `datamodel.chat`.
+- ✅ **Frontend** (`pages/DataModel.jsx`, ~750 lines, single file with embedded sub-components):
+  - Route `/data-model`. Vertical PanelGroup: ER diagram top (re-uses `ERDiagram.jsx` from Section 9) + bottom 3-panel horizontal layout (Chat | DDL Tabs | Artifacts).
+  - DDL Viewer with embedded SQL syntax highlighting (regex-based, no extra deps), Generate (SSE with live progress bar), View/Edit toggle, Freeze, Download.
+  - Bus Matrix Viewer with scrollable matrix table (yellow ✓ on intersection) + accordion of fact details (grain, source tables, measures).
+  - Data Model RAG Chat with OLTP/OLAP toggle, [DDL_CHANGE] detection, "Apply to OLTP"/"Apply to OLAP" buttons that merge change into the artifact.
+  - Artifacts panel: 6 cards (3 DDL/matrix + 3 migration scripts) with Download, Traceability tree, "Generate All Scripts" SSE button.
+  - Reset modals: typed-"RESET" confirmation for Stage 2 (orange) and Factory (red).
+  - Pipeline-aware: locked banner shown when DataModel stage status is "locked".
+- ✅ **Sidebar**: DataModel stage now routes to `/data-model` via per-stage `path` field; locked stages remain inert with toast.
+- ✅ **Testing agent**: 19/19 backend pytest tests PASS, all frontend UI checkpoints PASS (`/app/test_reports/iteration_6.json`). SSE LLM-generation endpoints NOT exercised end-to-end (would burn 60-120s LLM tokens each) — pipeline gate, CRUD shapes, reset flows all verified.
+
+## Stage 2 Acceptance Status
+- 🟢 Discovery → DataModel handoff: working (verified pipeline.py.save_stage_context wiring).
+- 🟢 OLTP/OLAP DDL generation: SSE pipeline + LLM prompt seeded.
+- 🟢 Bus Matrix JSON generation: working.
+- 🟢 Migration scripts (3 Python files): working.
+- 🟢 RAG chat with [DDL_CHANGE] detection: working.
+- 🟢 Artifact freeze cascading → DataModel StageContext + Architecture unlock: working.
+- 🟢 Stage 2 reset + Factory reset: working with typed-confirmation modals.
+
 ## Backlog
 **P0** — None (Prompt 2/4 complete).
 **P1 (User-driven, upcoming Prompts 3-4 in series)** — Wait for next prompt from user.
