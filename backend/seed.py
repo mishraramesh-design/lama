@@ -201,6 +201,323 @@ Instructions:
   -- your SQL here
   [/DDL_CHANGE]""",
     },
+    # ---------- Stage 3 — Architecture ----------
+    {
+        "key": "arch.recommend",
+        "stage": "Architecture",
+        "description": "Analyses SRS + OLTP + module map; recommends architecture pattern and decomposes into services. Returns strict JSON.",
+        "force_update": True,
+        "template": """You are a senior software architect analysing a legacy application for migration.
+
+PROJECT: {project_name}
+SOURCE: {source_tech} → TARGET: React frontend + {backend_lang} backend + PostgreSQL
+
+SRS SUMMARY:
+{srs_summary}
+
+OLTP SCHEMA SUMMARY:
+{oltp_summary}
+
+MODULE STRUCTURE:
+{module_context}
+
+COMPLEXITY SIGNALS:
+{complexity_signals}
+
+RELEVANT KB CONTEXT:
+{rag_context}
+
+TASK: Recommend the best architecture pattern and decompose into services.
+
+RULES:
+- Never recommend microservices for simple apps (<50 tables, <5 modules).
+- Modular monolith is valid and often better for medium complexity.
+- Every service must have a clear single responsibility.
+- Use actual module and table names from the KB — never generic names.
+- backend_lang must be one of: nodejs | python | java | go.
+- Default backend_lang: nodejs (override only if Java/Spring detected in source).
+
+Return STRICT JSON ONLY. No markdown fences. Schema:
+{{
+  "recommended_pattern": "microservices|modular_monolith|monolith",
+  "reasoning": "...",
+  "complexity_score": 0,
+  "services": [
+    {{
+      "name": "kebab-case-service-name",
+      "display_name": "Human Readable Name",
+      "responsibility": "one sentence",
+      "tables": ["table1", "table2"],
+      "api_endpoints": ["POST /resource", "GET /resource/:id"],
+      "dependencies": ["other-service-name"],
+      "events_published": [],
+      "events_consumed": [],
+      "backend_lang": "nodejs",
+      "estimated_loc": 500
+    }}
+  ],
+  "frontend_service": {{
+    "name": "frontend",
+    "framework": "react",
+    "pages": ["PageName"],
+    "api_consumers": ["service-name"]
+  }},
+  "shared_services": ["auth", "notification"],
+  "event_bus": false,
+  "api_gateway": true,
+  "rationale": "..."
+}}""",
+    },
+    {
+        "key": "arch.hld",
+        "stage": "Architecture",
+        "description": "Generates a single section of the High Level Design document.",
+        "force_update": True,
+        "template": """You are writing a High Level Design (HLD) document.
+
+PROJECT: {project_name}
+PATTERN: {recommended_pattern}
+SERVICES: {services_summary}
+SRS FUNCTIONAL REQUIREMENTS: {srs_functional}
+OLTP SCHEMA: {oltp_summary}
+
+Write the "{section_name}" section of the HLD.
+
+{section_instructions}
+
+RULES:
+- Use actual service names, table names, endpoint paths.
+- All diagrams must be valid Mermaid syntax inside ```mermaid fences.
+- Sequence diagrams: use sequenceDiagram notation.
+- Class diagrams: use classDiagram notation.
+- C4 context: use C4Context notation.
+- Deployment: use graph LR notation.
+- Minimum {min_words} words.
+- No placeholder text — every detail must reference real entities.
+- Format: markdown with ## sub-headings.
+
+Return only the markdown for this section. No preamble.""",
+    },
+    {
+        "key": "arch.lld",
+        "stage": "Architecture",
+        "description": "Generates Low Level Design markdown for a single service.",
+        "force_update": True,
+        "template": """You are writing the Low Level Design for one service.
+
+PROJECT: {project_name}
+SERVICE: {service_name} ({service_responsibility})
+BACKEND: {backend_lang}
+TABLES OWNED: {service_tables}
+API ENDPOINTS: {service_endpoints}
+DEPENDENCIES: {service_dependencies}
+HLD CONTEXT: {hld_summary}
+OLTP DDL (relevant tables): {relevant_ddl}
+
+Write a complete LLD for this service covering:
+1. Class/Module diagram (Mermaid classDiagram).
+2. Method signatures (params, returns, JSDoc/docstring style).
+3. Database design for this service (tables, indexes, constraints).
+4. API specification (OpenAPI 3.0 YAML inside ```yaml fences).
+5. Error handling strategy (codes, retry, circuit breaker).
+6. Test strategy (unit + integration scenarios).
+
+RULES:
+- Use actual column names from the OLTP DDL.
+- Be exhaustive — a developer must implement from this alone.
+- Never use generic names like "doSomething" or "handleRequest".
+
+Return markdown only. No preamble.""",
+    },
+    {
+        "key": "arch.sequence",
+        "stage": "Architecture",
+        "description": "Mermaid sequenceDiagram for one workflow.",
+        "force_update": True,
+        "template": """You are creating a Mermaid sequence diagram for one key workflow.
+
+PROJECT: {project_name}
+WORKFLOW: {use_case_name}
+USE CASE: {use_case_content}
+SERVICES: {services_list}
+RELEVANT ENDPOINTS: {relevant_endpoints}
+
+Create a detailed Mermaid sequenceDiagram showing:
+- All actors (user roles from SRS).
+- All service-to-service calls.
+- Database interactions.
+- Async events if applicable.
+- Error / rejection paths as alt blocks.
+- Authentication checks.
+
+Use actual service names, endpoint paths, DB table names.
+
+Return ONLY the mermaid block:
+```mermaid
+sequenceDiagram
+...
+```
+No explanation. No preamble.""",
+    },
+    {
+        "key": "arch.chat",
+        "stage": "Architecture",
+        "description": "RAG-grounded architecture refinement chat. Emits change markers.",
+        "force_update": True,
+        "template": """You are an architecture consultant reviewing a design.
+
+PROJECT: {project_name}
+CURRENT ARCHITECTURE:
+{arch_context}
+
+RELEVANT KB CONTEXT:
+{rag_context}
+
+USER REQUEST: {message}
+
+Instructions:
+- Answer architecture questions directly and concisely.
+- For changes wrap modified content in change markers:
+  [HLD_CHANGE:section_name] ...updated markdown... [/HLD_CHANGE]
+  [ARCH_CHANGE:service_name] ...updated service definition JSON... [/ARCH_CHANGE]
+  [SERVICE_ADD] ...service definition JSON... [/SERVICE_ADD]
+  [SERVICE_REMOVE:service_name]
+- Only output change markers when the user is requesting a change.
+- Keep changes minimal and targeted.
+- Always explain your reasoning before the change markers.""",
+    },
+    # ---------- Stage 4 — Code Generation ----------
+    {
+        "key": "codegen.service",
+        "stage": "CodeGen",
+        "description": "Generates a single backend service file (route/model/service/middleware/dockerfile/test).",
+        "force_update": True,
+        "template": """You are a senior {backend_lang} developer.
+Generate production-ready code for one microservice/module.
+
+PROJECT: {project_name}
+SERVICE: {service_name} ({service_responsibility})
+BACKEND: {backend_lang}
+DATABASE: PostgreSQL
+
+LLD FOR THIS SERVICE:
+{service_lld}
+
+OLTP DDL (this service's tables):
+{service_ddl}
+
+API ENDPOINTS TO IMPLEMENT:
+{service_endpoints}
+
+DEPENDENCIES ON OTHER SERVICES:
+{service_dependencies}
+
+Generate the "{file_type}" file at path "{file_path}".
+
+File-type specific instructions:
+{file_type_instructions}
+
+CRITICAL RULES:
+- Every function/class must have JSDoc (JS/TS) or docstrings (Python/Java/Go).
+- Use async/await — no callbacks.
+- Validate ALL inputs.
+- Use parameterised queries — never string-interpolated SQL.
+- Return standardised error responses: {{"error": true, "code": "E001", "message": "..."}}.
+- Include logging at entry/exit of every route handler.
+- No hardcoded credentials — use environment variables.
+- Node.js: Express 5 or Fastify 4.
+- Python: FastAPI + SQLAlchemy 2.0.
+- Java: Spring Boot 3 + JPA.
+- Go: Gin + GORM.
+
+Return ONLY the file content. No preamble. No markdown fences.""",
+    },
+    {
+        "key": "codegen.frontend",
+        "stage": "CodeGen",
+        "description": "Generates a single React frontend file.",
+        "force_update": True,
+        "template": """You are a senior React + TypeScript developer.
+
+PROJECT: {project_name}
+COMPONENT TYPE: {component_type}
+FILE PATH: {file_path}
+AVAILABLE API SERVICES: {api_summary}
+RELEVANT SRS USE CASES: {relevant_use_cases}
+
+Generate the "{file_path}" file.
+
+{component_instructions}
+
+RULES:
+- TypeScript strictly typed — no any.
+- Functional components with hooks only.
+- React Query for data fetching, Zustand for global state.
+- Tailwind CSS for styling.
+- Accessible (aria labels, keyboard nav). Responsive (mobile-first).
+- Always handle loading + error + empty states.
+- Tests use Vitest + React Testing Library.
+
+Return ONLY the file content. No preamble. No markdown fences.""",
+    },
+    {
+        "key": "codegen.chat",
+        "stage": "CodeGen",
+        "description": "RAG-grounded code refinement chat. Emits [FILE_CHANGE:path] markers with full updated file content.",
+        "force_update": True,
+        "template": """You are reviewing generated application code.
+
+PROJECT: {project_name}
+TARGET FILE: {file_path}
+CURRENT CONTENT:
+{current_content}
+
+RELATED FILES CONTEXT:
+{related_context}
+
+RELEVANT KB CONTEXT:
+{rag_context}
+
+USER REQUEST: {message}
+
+Instructions:
+- For code changes wrap in:
+  [FILE_CHANGE:{file_path}]
+  ...complete updated file content...
+  [/FILE_CHANGE]
+- Only output the complete file — never partial snippets.
+- Explain what changed and why before the change marker.
+- If the change affects other files, mention them specifically.
+- Never break existing interfaces.""",
+    },
+    {
+        "key": "codegen.docs",
+        "stage": "CodeGen",
+        "description": "Generates README/API_REFERENCE/ARCHITECTURE markdown docs.",
+        "force_update": True,
+        "template": """You are writing technical documentation.
+
+PROJECT: {project_name}
+SERVICE: {service_name}
+DOC TYPE: {doc_type}
+SERVICE LLD: {service_lld}
+GENERATED FILES: {file_list}
+
+Write the {doc_type} documentation for this service.
+
+For service README.md include:
+- Overview and responsibility.
+- Tech stack and dependencies.
+- Setup and running locally.
+- Environment variables (table).
+- API endpoints summary (table).
+- Database tables owned (list).
+- Events published/consumed.
+- Testing instructions.
+- Deployment notes.
+
+Return markdown only. No preamble.""",
+    },
     {
         "key": "arch.decompose",
         "stage": "Architecture",

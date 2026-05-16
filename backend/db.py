@@ -26,3 +26,11 @@ data_models = db.data_models
 bus_matrix = db.bus_matrix
 olap_models = db.olap_models
 migration_artifacts = db.migration_artifacts
+
+# Stage 3 — Architecture
+arch_documents = db.arch_documents
+arch_services = db.arch_services
+
+# Stage 4 — Code Generation
+codegen_files = db.codegen_files
+codegen_runs = db.codegen_runs

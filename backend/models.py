@@ -193,3 +193,78 @@ class DataModelArtifact(BaseModel):
     frozen: bool = False
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
+
+
+# ---------- Architecture (Stage 3) ----------
+class ArchDocument(BaseModel):
+    """One architecture artifact — HLD, LLD, API contract, sequence diagrams, service map, ADR."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    project_id: str
+    type: str
+    content: str = ""
+    version: int = 1
+    frozen: bool = False
+    frozen_at: Optional[str] = None
+    generated_by: str = ""
+    tracability: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
+
+
+class ServiceDefinition(BaseModel):
+    """One microservice / module boundary recommended by Stage 3."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    project_id: str
+    name: str
+    display_name: str
+    pattern: str = "microservice"
+    backend_lang: str = "nodejs"
+    frontend: bool = False
+    tables: List[str] = Field(default_factory=list)
+    api_endpoints: List[str] = Field(default_factory=list)
+    dependencies: List[str] = Field(default_factory=list)
+    events_published: List[str] = Field(default_factory=list)
+    events_consumed: List[str] = Field(default_factory=list)
+    status: str = "pending"
+    codegen_status: str = "pending"
+    source_module: str = ""
+    responsibility: str = ""
+    estimated_loc: int = 0
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
+
+
+# ---------- Code Generation (Stage 4) ----------
+class CodegenFile(BaseModel):
+    """One generated file inside a service."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    project_id: str
+    service_id: str = ""
+    service_name: str = ""
+    file_path: str
+    content: str = ""
+    language: str = "text"
+    file_type: str = "other"
+    version: int = 1
+    edited: bool = False
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
+
+
+class CodegenRun(BaseModel):
+    """Tracks one full code generation run."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    project_id: str
+    status: str = "running"
+    services_total: int = 0
+    services_done: int = 0
+    files_total: int = 0
+    files_done: int = 0
+    errors: List[Dict[str, Any]] = Field(default_factory=list)
+    github_commit: str = ""
+    started_at: str = Field(default_factory=_now_iso)
+    completed_at: Optional[str] = None
