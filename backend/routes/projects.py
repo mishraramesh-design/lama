@@ -34,7 +34,9 @@ async def get_project(project_id: str):
     if not doc:
         raise HTTPException(404, "Project not found")
     return Project(**doc)
-e")
+
+
+@router.get("/{project_id}/pipeline")
 async def get_pipeline_status(project_id: str):
     """Per-stage pipeline status — used by the sidebar to render lock / available / frozen badges."""
     stages = ["Discovery", "DataModel", "Architecture", "CodeGen", "Living"]

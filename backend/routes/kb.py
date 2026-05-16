@@ -6,12 +6,13 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import List
 from datetime import datetime, timezone
 
-from db import kb_files, kb_chunks, kb_entities, kb_toon, projects
+from db import kb_files, kb_chunks, kb_entities, kb_toon, projects, srs_documents
 from models import KBFile, KBStatus
 from kb.parsers import parse_file, chunk_text
 from kb.owl_extractor import extract, aggregate_stats
 from kb.toon import serialise, summarise
 from kb.vector_store import index_chunks as qdrant_index, delete_project_vectors
+from kb.owl_export import export_owl
 
 logger = logging.getLogger("lama.kb")
 
@@ -340,3 +341,33 @@ async def get_glossary(project_id: str):
             if c.get("name"):
                 terms.add(c["name"])
     return {"terms": sorted(terms)[:500]}
+
+
+@router.get("/{project_id}/owl-export")
+async def download_owl(project_id: str):
+    """Download the full OWL/JSON-LD context bundle for Stage 2 / Stage 3 consumption."""
+    from fastapi.responses import JSONResponse
+
+    proj = await projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    entities = await kb_entities.find(
+        {"project_id": project_id}, {"_id": 0}
+    ).to_list(100000)
+
+    srs_doc      = await srs_documents.find_one(
+        {"project_id": project_id}, {"_id": 0}
+    )
+    srs_sections = (srs_doc or {}).get("sections", {})
+
+    owl_data = export_owl(proj, entities, srs_sections)
+
+    return JSONResponse(
+        content=owl_data,
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="owl_context_{project_id}.json"',
+            "Content-Type": "application/json",
+        },
+    )

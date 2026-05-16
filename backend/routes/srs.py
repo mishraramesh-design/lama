@@ -6,10 +6,12 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone
 
-from db import srs_documents, kb_toon, messages, projects, audit_log, prompts, project_prompts
-from models import SRSDocument, SRSSectionUpdate
+from db import srs_documents, kb_toon, messages, projects, audit_log, prompts, project_prompts, kb_entities, stage_context as stage_context_col
+from models import SRSDocument, SRSSectionUpdate, StageContext
 from llm import chat_completion
 from kb.vector_store import search as qdrant_search
+from kb.owl_export import export_owl
+from kb.toon import serialise as toon_serialise
 
 
 SECTION_QUERIES = {
@@ -159,7 +161,100 @@ Write at minimum one use case per major controller group found.""",
 - Timeline and compliance constraints
 - Migration risk register: top 10 highest-risk entities with reason""",
     },
+    {
+        "key": "entity_model",
+        "label": "9. Entity Relationship Model",
+        "toon_focus": "TABLES",
+        "min_words": 0,
+        "instructions": "",
+    },
 ]
+
+
+async def _gen_entity_model(project_id: str) -> dict:
+    """Compute ER diagram data deterministically from kb_entities (no LLM)."""
+    import math
+    from collections import defaultdict as _defaultdict
+
+    entities = await kb_entities.find(
+        {"project_id": project_id, "type": "TABLE"}, {"_id": 0}
+    ).to_list(2000)
+
+    nodes = []
+    edges = []
+    edge_set = set()
+
+    for e in entities:
+        parts  = e["name"].split("_")
+        domain = parts[0] if len(parts) > 1 else "other"
+        node = {
+            "id":       e["name"],
+            "name":     e["name"],
+            "pk":       e.get("pk", ""),
+            "domain":   domain,
+            "columns": [
+                {
+                    "name":     c["name"],
+                    "type":     c["type"],
+                    "is_pk":    c["name"] == e.get("pk", ""),
+                    "is_fk":    any(fk["column"] == c["name"]
+                                    for fk in e.get("fks", [])),
+                    "nullable": True,
+                }
+                for c in (e.get("columns") or [])
+            ],
+            "fk_count":  len(e.get("fks", [])),
+            "col_count": len(e.get("columns") or []),
+        }
+        nodes.append(node)
+        for fk in (e.get("fks") or []):
+            key = f"{e['name']}.{fk['column']}->{fk['ref_table']}"
+            if key not in edge_set:
+                edge_set.add(key)
+                edges.append({
+                    "id":          key,
+                    "from_table":  e["name"],
+                    "from_col":    fk["column"],
+                    "to_table":    fk["ref_table"],
+                    "type":        "fk",
+                    "cardinality": "many-to-one",
+                })
+
+    # Domain-clustered layout
+    domain_groups = _defaultdict(list)
+    for n in nodes:
+        domain_groups[n["domain"]].append(n["id"])
+
+    domain_list = list(domain_groups.keys())
+    grid_cols   = max(math.ceil(math.sqrt(len(domain_list))), 1)
+    for di, domain in enumerate(domain_list):
+        dx      = (di % grid_cols) * 600 + 300
+        dy      = (di // grid_cols) * 500 + 300
+        members = domain_groups[domain]
+        for mi, table_id in enumerate(members):
+            angle  = (2 * math.pi * mi) / max(len(members), 1)
+            radius = min(40 * len(members), 200)
+            for n in nodes:
+                if n["id"] == table_id:
+                    n["x"]            = dx + radius * math.cos(angle)
+                    n["y"]            = dy + radius * math.sin(angle)
+                    n["domain_index"] = di
+                    break
+
+    er_data = {
+        "nodes": nodes,
+        "edges": edges,
+        "domains": {
+            d: {"tables": tbls, "index": i}
+            for i, (d, tbls) in enumerate(domain_groups.items())
+        },
+        "stats": {
+            "total_tables":        len(nodes),
+            "total_relationships": len(edges),
+            "domains":             len(domain_groups),
+        },
+    }
+    return {"content": json.dumps(er_data), "tokens": 0}
 
 
 def extract_toon_section(toon: str, section_name: str, max_chars: int) -> str:
@@ -195,6 +290,10 @@ async def _get_prompt(project_id: str, key: str) -> str:
 
 async def _gen_one_section(cfg: dict, proj: dict, full_toon: str, summary: str, convo_text: str, model: str, project_id: str | None = None) -> dict:
     """Generate one SRS section. Returns {'content': ..., 'tokens': int}."""
+    # Section 9 is computed deterministically from KB entities — no LLM.
+    if cfg["key"] == "entity_model":
+        return await _gen_entity_model(project_id or "")
+
     # Structural skeleton (smaller now since RAG fills in the specifics)
     toon_slice = extract_toon_section(full_toon, cfg["toon_focus"], 4000)
 
@@ -470,7 +569,7 @@ async def get_srs(project_id: str):
             "sections": {k: "" for k in [
                 "purpose", "scope", "definitions", "overall_description",
                 "functional_requirements", "non_functional_requirements",
-                "use_cases", "constraints",
+                "use_cases", "constraints", "entity_model",
             ]},
             "frozen": False,
             "version": 0,
@@ -806,12 +905,40 @@ def _render_pdf(project: dict, doc: dict) -> bytes:
         ("non_functional_requirements", "6. Non-Functional Requirements"),
         ("use_cases", "7. Use Cases"),
         ("constraints", "8. Constraints"),
+        ("entity_model", "9. Entity Relationship Model"),
     ]
     sections = doc.get("sections", {})
     for idx, (key, label) in enumerate(section_order):
         if idx > 0:
             elements.append(PageBreak())
         elements.append(Paragraph(label, h1))
+        if key == "entity_model":
+            # ER section is JSON in storage — render as a text summary in PDF.
+            raw = sections.get(key) or ""
+            er = {}
+            try:
+                er = json.loads(raw) if raw else {}
+            except Exception:
+                er = {}
+            stats = (er or {}).get("stats", {})
+            domains = list((er or {}).get("domains", {}).keys())
+            tables_n = stats.get("total_tables", 0)
+            rels_n = stats.get("total_relationships", 0)
+            domains_n = stats.get("domains", len(domains))
+            summary_line = (
+                f"Entity Relationship Model: {tables_n} tables across "
+                f"{domains_n} domains with {rels_n} foreign key relationships."
+            )
+            elements.append(Paragraph(summary_line, body))
+            if domains:
+                elements.append(Paragraph(
+                    f"<b>Key domains:</b> {', '.join(domains[:30])}.", body
+                ))
+            elements.append(Paragraph(
+                "See the interactive ER diagram in LAMA for full visualisation.",
+                body,
+            ))
+            continue
         elements.extend(_md_to_flowables(sections.get(key) or ""))
 
     pdf.build(elements)

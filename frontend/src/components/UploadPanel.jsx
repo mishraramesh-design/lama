@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Upload, FileText, Trash2, Hammer, Database, Boxes, Users, GitBranch, FolderSearch, ChevronLeft } from "lucide-react";
-import { uploadKBFiles, listKBFiles, deleteKBFile, buildKB, kbStatus, scanFolder } from "@/lib/api";
+import { Upload, FileText, Trash2, Hammer, Database, Boxes, Users, GitBranch, FolderSearch, ChevronLeft, Download } from "lucide-react";
+import { uploadKBFiles, listKBFiles, deleteKBFile, buildKB, kbStatus, scanFolder, owlExportUrl } from "@/lib/api";
 import HelpIcon from "@/components/HelpIcon";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -233,6 +233,15 @@ export default function UploadPanel({ projectId, onKBUpdated, onCollapse }) {
           <MetricCard icon={GitBranch} label="Relations" value={status?.relationships} testId="metric-relations" help="Foreign-key relationships between tables." />
           <MetricCard icon={Users} label="Roles" value={status?.roles} testId="metric-roles" help="Roles extracted from INSERT statements into role-like tables." />
         </div>
+        <button
+          data-testid="owl-export-btn"
+          onClick={() => window.open(owlExportUrl(projectId), "_blank")}
+          disabled={!status?.entities}
+          className="flex items-center gap-1.5 text-xs border border-[#E6E6E6] rounded-sm px-2 py-1.5 bg-white hover:border-[#2E2E38] disabled:opacity-40 disabled:cursor-not-allowed mt-2 w-full justify-center"
+          title="Downloads OWL/JSON-LD ontology used by Stage 2 and Stage 3"
+        >
+          <Download className="w-3.5 h-3.5" /> Download OWL Context
+        </button>
       </div>
     </div>
   );

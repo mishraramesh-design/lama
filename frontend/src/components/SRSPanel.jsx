@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getSRS, updateSRSSection, freezeSRS, unfreezeSRS, srsPdfUrl, API } from "@/lib/api";
 import HelpIcon from "@/components/HelpIcon";
+import ERDiagram from "@/components/ERDiagram";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -16,6 +17,7 @@ const SECTIONS = [
   { key: "non_functional_requirements", label: "6. Non-Functional Requirements" },
   { key: "use_cases", label: "7. Use Cases" },
   { key: "constraints", label: "8. Constraints" },
+  { key: "entity_model", label: "9. Entity Relationship Model" },
 ];
 
 const MD_COMPONENTS = {
@@ -39,7 +41,7 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
   const [srs, setSrs] = useState(null);
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [progress, setProgress] = useState({ index: 0, total: 8, label: "" });
+  const [progress, setProgress] = useState({ index: 0, total: 9, label: "" });
   const [doneSections, setDoneSections] = useState(new Set());
   const [editingSection, setEditingSection] = useState(null);
   const [editContent, setEditContent] = useState("");
@@ -56,7 +58,7 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
     if (!projectId) return;
     setGenerating(true);
     setDoneSections(new Set());
-    setProgress({ index: 0, total: 8, label: "Starting…" });
+    setProgress({ index: 0, total: 9, label: "Starting…" });
     try {
       const res = await fetch(`${API}/srs/generate/stream`, {
         method: "POST",
@@ -90,7 +92,7 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
             setSrs((s) => ({ ...(s || {}), sections: { ...(s?.sections || {}), [data.section]: data.content } }));
             setDoneSections((d) => { const n = new Set(d); n.add(data.section); return n; });
           } else if (data.type === "complete") {
-            setProgress({ index: data.total || 8, total: data.total || 8, label: "Complete" });
+            setProgress({ index: data.total || 9, total: data.total || 9, label: "Complete" });
             toast.success(`SRS v${data.version} generated`, { description: `${(data.total_tokens || 0).toLocaleString()} tokens used` });
           }
         }
@@ -282,6 +284,28 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
               const isCurrent = generating && progress.label.startsWith(s.label);
               const content = srs?.sections?.[s.key];
               const isEditing = editingSection === s.key;
+
+              // Section 9: Entity Relationship Diagram (computed, not editable)
+              if (s.key === "entity_model") {
+                let erData = null;
+                try { erData = content ? JSON.parse(content) : null; } catch { erData = null; }
+                return (
+                  <section key={s.key} className="mb-8" data-testid="srs-section-entity_model">
+                    <div className="flex items-center justify-between mb-2">
+                      <h2 className="font-display text-base font-bold text-[#2E2E38] tracking-tight">{s.label}</h2>
+                      {generating && (
+                        isDone ? <span className="text-[10px] uppercase tracking-wider bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-sm font-bold">Done</span>
+                        : isCurrent ? <span className="text-[10px] uppercase tracking-wider bg-[#FFFCE6] border border-[#FFE600] text-[#2E2E38] px-1.5 py-0.5 rounded-sm flex items-center"><Loader2 className="w-2.5 h-2.5 mr-1 animate-spin" />Computing</span>
+                        : <span className="text-[10px] uppercase tracking-wider bg-[#F6F6FA] text-[#747480] px-1.5 py-0.5 rounded-sm">Queued</span>
+                      )}
+                    </div>
+                    <div className="border border-[#E6E6E6] rounded-sm overflow-hidden" style={{ height: 520 }}>
+                      <ERDiagram data={erData} height={520} />
+                    </div>
+                  </section>
+                );
+              }
+
               return (
                 <section key={s.key} className="mb-8" data-testid={`srs-section-${s.key}`}>
                   <div className="flex items-center justify-between mb-2">

@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Lock, CheckCircle2, Circle, Library, BookOpen, Database, Boxes, Code2, Activity, Settings as SettingsIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { useProjects } from "@/state/ProjectContext";
+import { getPipelineStatus } from "@/lib/api";
 import HelpIcon from "@/components/HelpIcon";
 import { toast } from "sonner";
 
@@ -170,9 +171,11 @@ export default function Sidebar() {
         </div>
         <nav className="space-y-1">
           {STAGES.map((s, idx) => {
-            const status = active?.stage_status?.[s.key] || "locked";
+            const status = stageStatus(s.key, idx);
+            const ctx = pipeline[s.key];
             const isLocked = status === "locked";
             const isActive = status === "active";
+            const isAvailable = status === "available";
             const isFrozen = status === "frozen";
             const isCurrent = location.pathname === "/" && idx === 0 && !isLocked;
             const Icon = s.icon;
@@ -192,6 +195,8 @@ export default function Sidebar() {
                     ? "border-[#E6E6E6] bg-slate-50 text-slate-400 cursor-not-allowed"
                     : isCurrent
                     ? "border-[#2E2E38] bg-[#2E2E38] text-white"
+                    : isFrozen
+                    ? "border-[#FFE600] bg-[#FFFCE6] text-[#2E2E38]"
                     : "border-[#E6E6E6] hover:bg-[#F6F6FA] text-slate-700"
                 }`}
               >
@@ -199,11 +204,24 @@ export default function Sidebar() {
                   {isFrozen ? <CheckCircle2 className="w-4 h-4" /> : isLocked ? <Lock className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
                 </div>
                 <div className="flex-1">
-                  <div className="text-[13px] font-semibold flex items-center justify-between">
-                    <span>{s.label}</span>
-                    {isLocked && <span className="text-[9px] uppercase bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-sm tracking-wider">Soon</span>}
-                    {isFrozen && <span className="text-[9px] uppercase bg-[#FFE600] text-[#2E2E38] px-1.5 py-0.5 rounded-sm tracking-wider font-bold">Frozen</span>}
-                    {isActive && !isCurrent && <Circle className="w-2 h-2 fill-current text-[#FFE600]" />}
+                  <div className="text-[13px] font-semibold flex items-center justify-between gap-1">
+                    <span className="truncate">{s.label}</span>
+                    {isFrozen && (
+                      <span data-testid={`stage-${s.key}-badge-frozen`} className="text-[9px] uppercase bg-[#FFE600] text-[#2E2E38] px-1.5 py-0.5 rounded-sm tracking-wider font-bold shrink-0">
+                        Frozen v{ctx?.version ?? "—"}
+                      </span>
+                    )}
+                    {!isFrozen && isAvailable && (
+                      <span data-testid={`stage-${s.key}-badge-ready`} className="text-[9px] uppercase bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-sm tracking-wider font-bold shrink-0">
+                        Ready
+                      </span>
+                    )}
+                    {!isFrozen && !isAvailable && isLocked && (
+                      <span data-testid={`stage-${s.key}-badge-locked`} className="text-[9px] uppercase bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-sm tracking-wider shrink-0">Soon</span>
+                    )}
+                    {isActive && !isCurrent && !isFrozen && !isAvailable && (
+                      <Circle className="w-2 h-2 fill-current text-[#FFE600]" />
+                    )}
                   </div>
                   <div className={`text-[11px] mt-0.5 leading-snug ${isCurrent ? "text-white/80" : "text-slate-500"}`}>{s.desc}</div>
                 </div>

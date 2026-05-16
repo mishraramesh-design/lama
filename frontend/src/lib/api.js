@@ -26,6 +26,7 @@ export const buildKB = (projectId) => api.post("/kb/build", { project_id: projec
 export const kbStatus = (projectId) => api.get(`/kb/${projectId}/status`).then((r) => r.data);
 export const kbToon = (projectId) => api.get(`/kb/${projectId}/toon`).then((r) => r.data);
 export const kbGlossary = (projectId) => api.get(`/kb/${projectId}/glossary`).then((r) => r.data);
+export const owlExportUrl = (projectId) => `${API}/kb/${projectId}/owl-export`;
 
 // Chat
 export const listModels = () => api.get("/chat/models").then((r) => r.data);
