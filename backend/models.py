@@ -79,6 +79,8 @@ class KBStatus(BaseModel):
     roles: int
     relationships: int
     toon_size: int
+    modules: int = 0
+    component_maps: int = 0
 
 
 # ---------- Chat ----------

@@ -13,6 +13,7 @@ from kb.owl_extractor import extract, aggregate_stats
 from kb.toon import serialise, summarise
 from kb.vector_store import index_chunks as qdrant_index, delete_project_vectors
 from kb.owl_export import export_owl
+from kb.module_inventory_parser import parse_module_inventory, generate_module_text_summary
 
 logger = logging.getLogger("lama.kb")
 
@@ -315,6 +316,8 @@ async def kb_status(project_id: str):
         roles=stats.get("roles", 0),
         relationships=stats.get("relationships", 0),
         toon_size=toon_size,
+        modules=stats.get("modules", 0),
+        component_maps=stats.get("component_maps", 0),
     )
 
 
@@ -371,3 +374,182 @@ async def download_owl(project_id: str):
             "Content-Type": "application/json",
         },
     )
+
+
+
+# ============================================================
+# Module Inventory — generic import (Excel / CSV / JSON)
+# ============================================================
+@router.post("/import-module-inventory")
+async def import_module_inventory(
+    project_id: str = Form(...),
+    file: UploadFile = File(...),
+):
+    """Import module inventory from .xlsx / .csv / .json. Idempotent — replaces previous MODULE/COMPONENT_MAP entities."""
+    proj = await projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    fname = file.filename or "inventory"
+    ext = fname.lower().rsplit(".", 1)[-1] if "." in fname else ""
+    if ext not in ("xlsx", "xls", "csv", "json"):
+        raise HTTPException(400, "Supported formats: .xlsx, .csv, .json")
+
+    content = await file.read()
+    entities = parse_module_inventory(fname, content)
+    if not entities:
+        raise HTTPException(
+            422,
+            "Could not parse the file. Ensure it contains module and component/table mapping data. "
+            "Supported formats: Excel (.xlsx), CSV (.csv), JSON (.json).",
+        )
+
+    modules = [e for e in entities if e.get("type") == "MODULE"]
+    comp_maps = [e for e in entities if e.get("type") == "COMPONENT_MAP"]
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Idempotent replace
+    await kb_entities.delete_many({
+        "project_id": project_id,
+        "type": {"$in": ["MODULE", "COMPONENT_MAP"]},
+    })
+
+    BATCH = 500
+    for start in range(0, len(entities), BATCH):
+        batch = entities[start:start + BATCH]
+        docs = [{**e, "project_id": project_id, "file_id": "module_inventory"} for e in batch]
+        if docs:
+            await kb_entities.insert_many(docs)
+
+    summary_text = generate_module_text_summary(entities)
+    chunks = chunk_text(summary_text) if summary_text else []
+
+    # Replace previous module_inventory file + chunks
+    await kb_files.delete_many({"project_id": project_id, "filetype": "module_inventory"})
+    await kb_chunks.delete_many({"project_id": project_id, "file_id": "module_inventory"})
+
+    kb_file = KBFile(
+        project_id=project_id,
+        filename=fname,
+        filetype="module_inventory",
+        size=len(content),
+        chunk_count=len(chunks),
+        entity_count=len(entities),
+        status="processed",
+    )
+    await kb_files.insert_one(kb_file.model_dump())
+
+    if chunks:
+        chunk_docs = [
+            {
+                "id": f"module_inventory:{i}",
+                "project_id": project_id,
+                "file_id": "module_inventory",
+                "chunk_index": i,
+                "content": c,
+                "created_at": now,
+            }
+            for i, c in enumerate(chunks)
+        ]
+        await kb_chunks.insert_many(chunk_docs)
+        try:
+            await qdrant_index(project_id, [
+                {
+                    "id": f"module_inventory:{i}",
+                    "content": c,
+                    "filename": fname,
+                    "filetype": "module_inventory",
+                }
+                for i, c in enumerate(chunks)
+            ])
+        except Exception:
+            pass  # non-blocking
+
+    # Rebuild TOON to include the # MODULES section
+    all_entities = await kb_entities.find({"project_id": project_id}, {"_id": 0}).to_list(200000)
+    toon = serialise(all_entities)
+    stats = aggregate_stats(all_entities)
+    summary = summarise(all_entities, stats)
+    await kb_toon.update_one(
+        {"project_id": project_id},
+        {"$set": {
+            "project_id": project_id,
+            "toon": toon,
+            "summary": summary,
+            "stats": stats,
+            "updated_at": now,
+        }},
+        upsert=True,
+    )
+
+    return {
+        "ok": True,
+        "modules": len(modules),
+        "component_maps": len(comp_maps),
+        "chunks": len(chunks),
+        "format_detected": ext,
+        "message": (
+            f"Imported {len(modules)} modules and {len(comp_maps)} component mappings "
+            f"from {ext.upper()} file. TOON rebuilt."
+        ),
+    }
+
+
+@router.get("/{project_id}/module-traceability")
+async def get_module_traceability(project_id: str):
+    """Return two views: user-imported modules vs. auto-detected domain groupings."""
+    from collections import defaultdict
+
+    entities = await kb_entities.find({"project_id": project_id}, {"_id": 0}).to_list(200000)
+
+    user_modules = [
+        {
+            "name": e["name"],
+            "component_count": e.get("component_count", 0),
+            "table_ref_count": e.get("table_ref_count", 0),
+            "source_format": e.get("source_format", ""),
+            "tables": (e.get("tables") or [])[:15],
+            "description": e.get("description", ""),
+        }
+        for e in entities if e.get("type") == "MODULE"
+    ]
+    user_modules.sort(key=lambda x: x["table_ref_count"], reverse=True)
+
+    auto_domains: dict = defaultdict(lambda: {"classes": [], "tables": [], "count": 0})
+    for e in entities:
+        if e.get("type") == "CLASS":
+            touched = set()
+            for m in (e.get("methods") or []):
+                for t in (m.get("tables") or []):
+                    p = t.split("_")
+                    if len(p) > 1:
+                        touched.add(p[0])
+            domain = next(iter(touched), "core") if touched else "core"
+            auto_domains[domain]["classes"].append(e["name"])
+            auto_domains[domain]["count"] += 1
+        elif e.get("type") == "TABLE":
+            p = e["name"].split("_")
+            domain = p[0] if len(p) > 1 else "other"
+            auto_domains[domain]["tables"].append(e["name"])
+
+    auto_list = sorted(
+        [
+            {
+                "domain": k,
+                "class_count": len(v["classes"]),
+                "table_count": len(v["tables"]),
+                "sample_classes": v["classes"][:5],
+                "sample_tables": v["tables"][:5],
+            }
+            for k, v in auto_domains.items()
+            if len(v["classes"]) + len(v["tables"]) > 1
+        ],
+        key=lambda x: x["class_count"] + x["table_count"],
+        reverse=True,
+    )
+
+    return {
+        "user_modules": user_modules,
+        "auto_modules": auto_list,
+        "has_user_import": len(user_modules) > 0,
+    }

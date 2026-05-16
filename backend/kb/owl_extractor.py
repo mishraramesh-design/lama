@@ -226,4 +226,6 @@ def aggregate_stats(entities: List[Dict[str, Any]]) -> Dict[str, int]:
                 stats["roles"] += 1
         elif t == "ROUTE":
             stats["routes"] += 1
+    stats["modules"] = len([e for e in entities if e.get("type") == "MODULE"])
+    stats["component_maps"] = len([e for e in entities if e.get("type") == "COMPONENT_MAP"])
     return stats

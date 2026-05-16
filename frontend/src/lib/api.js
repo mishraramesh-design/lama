@@ -27,6 +27,16 @@ export const kbStatus = (projectId) => api.get(`/kb/${projectId}/status`).then((
 export const kbToon = (projectId) => api.get(`/kb/${projectId}/toon`).then((r) => r.data);
 export const kbGlossary = (projectId) => api.get(`/kb/${projectId}/glossary`).then((r) => r.data);
 export const owlExportUrl = (projectId) => `${API}/kb/${projectId}/owl-export`;
+export const importModuleInventory = (projectId, file) => {
+  const fd = new FormData();
+  fd.append("project_id", projectId);
+  fd.append("file", file);
+  return api
+    .post("/kb/import-module-inventory", fd, { headers: { "Content-Type": "multipart/form-data" } })
+    .then((r) => r.data);
+};
+export const getModuleTraceability = (projectId) =>
+  api.get(`/kb/${projectId}/module-traceability`).then((r) => r.data);
 
 // Chat
 export const listModels = () => api.get("/chat/models").then((r) => r.data);

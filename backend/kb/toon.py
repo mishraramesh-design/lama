@@ -70,16 +70,43 @@ def serialise_individual(entity: Dict[str, Any]) -> str:
     return f"[INDIVIDUAL:{entity.get('name')}] in={entity.get('category','')}"
 
 
+def serialise_module(entity: Dict[str, Any]) -> str:
+    """User-imported business module: '[MODULE:Name] src=excel components=12 tables=45'
+    followed by up to 10 top components by table_count."""
+    name = entity.get("name", "")
+    src = entity.get("source_format", "import")
+    cc = entity.get("component_count", 0)
+    tc = entity.get("table_ref_count", 0)
+    lines = [f"[MODULE:{name}] src={src} components={cc} tables={tc}"]
+    for comp in sorted(
+        entity.get("components_detail", []) or [],
+        key=lambda x: x.get("table_count", 0),
+        reverse=True,
+    )[:10]:
+        refs = ",".join((comp.get("tables") or [])[:8])
+        lines.append(f"  [COMPONENT:{comp.get('name','')}] refs->{refs}")
+    if entity.get("description"):
+        lines.append(f"  [DESC:{str(entity['description'])[:120]}]")
+    return "\n".join(lines)
+
+
 def serialise(entities: List[Dict[str, Any]]) -> str:
     blocks: List[str] = []
 
+    modules = [e for e in entities if e.get("type") == "MODULE"]
     classes = [e for e in entities if e.get("type") == "CLASS"]
     tables = [e for e in entities if e.get("type") == "TABLE"]
     routes = [e for e in entities if e.get("type") == "ROUTE"]
     individuals = [e for e in entities if e.get("type") == "INDIVIDUAL"]
 
+    if modules:
+        blocks.append("# MODULES")
+        blocks.extend(
+            serialise_module(m)
+            for m in sorted(modules, key=lambda x: x.get("table_ref_count", 0), reverse=True)
+        )
     if classes:
-        blocks.append("# CLASSES")
+        blocks.append("\n# CLASSES" if modules else "# CLASSES")
         blocks.extend(serialise_class(c) for c in classes)
     if tables:
         blocks.append("\n# TABLES")
