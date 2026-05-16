@@ -88,6 +88,8 @@ class ChatRequest(BaseModel):
     model: str = "deepseek/deepseek-chat"
     stage: str = "Discovery"
     conversation_id: Optional[str] = None
+    edit_mode: bool = False
+    selected_section: Optional[str] = None
 
 
 class ChatMessage(BaseModel):

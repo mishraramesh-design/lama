@@ -9,6 +9,19 @@ from datetime import datetime, timezone
 from db import srs_documents, kb_toon, messages, projects, audit_log, prompts, project_prompts
 from models import SRSDocument, SRSSectionUpdate
 from llm import chat_completion
+from kb.vector_store import search as qdrant_search
+
+
+SECTION_QUERIES = {
+    "purpose": "system purpose user roles business modules controllers",
+    "scope": "controllers modules features endpoints functions",
+    "definitions": "roles acronyms terminology domain names",
+    "overall_description": "architecture tables relationships users sessions",
+    "functional_requirements": "CRUD workflow approval status calculation",
+    "non_functional_requirements": "performance security audit log uptime",
+    "use_cases": "workflow approval submission upload user journey",
+    "constraints": "foreign keys dependencies integrations external API",
+}
 
 router = APIRouter(prefix="/srs", tags=["srs"])
 
@@ -180,9 +193,30 @@ async def _get_prompt(project_id: str, key: str) -> str:
     return g["template"] if g else ""
 
 
-async def _gen_one_section(cfg: dict, proj: dict, full_toon: str, summary: str, convo_text: str, model: str) -> dict:
+async def _gen_one_section(cfg: dict, proj: dict, full_toon: str, summary: str, convo_text: str, model: str, project_id: str | None = None) -> dict:
     """Generate one SRS section. Returns {'content': ..., 'tokens': int}."""
-    toon_slice = extract_toon_section(full_toon, cfg["toon_focus"], 15000)
+    # Structural skeleton (smaller now since RAG fills in the specifics)
+    toon_slice = extract_toon_section(full_toon, cfg["toon_focus"], 4000)
+
+    # Semantic RAG: top-15 relevant code/schema chunks for this section
+    rag_chunks: list[str] = []
+    if project_id:
+        query = SECTION_QUERIES.get(cfg["key"], cfg["label"])
+        try:
+            rag_chunks = await qdrant_search(project_id, query, top_k=15)
+        except Exception:
+            rag_chunks = []
+    rag_context = "\n\n---\n\n".join(rag_chunks) if rag_chunks else ""
+
+    # If no RAG available, keep TOON slice large
+    if not rag_context:
+        toon_slice = extract_toon_section(full_toon, cfg["toon_focus"], 15000)
+
+    kb_block = (
+        f"STRUCTURAL SKELETON (TOON — {cfg['toon_focus']}):\n{toon_slice}"
+        + (f"\n\nSEMANTICALLY RELEVANT CODE & SCHEMA:\n{rag_context}" if rag_context else "")
+    )
+
     # Larger sections need a bigger token budget so they aren't cut off mid-document.
     if cfg["min_words"] >= 1500:
         max_tokens = 14000
@@ -200,8 +234,8 @@ KB SUMMARY: {summary}
 CONVERSATION CONTEXT:
 {convo_text}
 
-KNOWLEDGE BASE — {cfg['toon_focus']}:
-{toon_slice}
+KNOWLEDGE BASE:
+{kb_block}
 
 Write ONLY the "{cfg['label']}" section of the SRS.
 
@@ -311,7 +345,7 @@ async def generate_srs(payload: dict):
     sections: dict[str, str] = {}
     total_tokens = 0
     for cfg in SECTION_CONFIGS:
-        r = await _gen_one_section(cfg, proj, full_toon, summary, convo_text, model)
+        r = await _gen_one_section(cfg, proj, full_toon, summary, convo_text, model, project_id=project_id)
         sections[cfg["key"]] = r["content"]
         total_tokens += r["tokens"]
         # incremental save so client can poll GET /srs/{id}

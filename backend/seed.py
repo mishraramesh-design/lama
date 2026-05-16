@@ -35,6 +35,25 @@ GLOBAL_PROMPTS = [
         ),
     },
     {
+        "key": "srs.edit",
+        "stage": "Discovery",
+        "description": "Edits an SRS section based on user instruction; preserves untouched content.",
+        "force_update": True,
+        "template": (
+            "You are editing an IEEE 830 SRS section.\n"
+            "PROJECT: {project_name}\n"
+            "SECTION: {selected_section}\n\n"
+            "CURRENT SECTION CONTENT:\n{current_content}\n\n"
+            "RELEVANT KB CONTEXT:\n{toon_context}\n\n"
+            "USER INSTRUCTION: {asked_questions}\n\n"
+            "Rewrite the section incorporating the change. "
+            "Preserve all existing content not mentioned in the instruction. "
+            "Continue FR-IDs from the highest existing number. "
+            "Reference real class/table/method names from the KB. "
+            "Return ONLY the updated markdown for this section. No preamble. No code fences."
+        ),
+    },
+    {
         "key": "datamodel.optimise",
         "stage": "DataModel",
         "description": "Refactors legacy schema into normalised target schema.",

@@ -1,6 +1,7 @@
 """Knowledge Base endpoints: upload, build, status, scan-folder."""
 import os
 import re
+import logging
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import List
 from datetime import datetime, timezone
@@ -10,6 +11,9 @@ from models import KBFile, KBStatus
 from kb.parsers import parse_file, chunk_text
 from kb.owl_extractor import extract, aggregate_stats
 from kb.toon import serialise, summarise
+from kb.vector_store import index_chunks as qdrant_index, delete_project_vectors
+
+logger = logging.getLogger("lama.kb")
 
 router = APIRouter(prefix="/kb", tags=["kb"])
 
@@ -183,6 +187,20 @@ async def delete_file(file_id: str):
     return {"ok": True}
 
 
+@router.delete("/{project_id}/all")
+async def delete_all_kb(project_id: str):
+    """Wipe all KB data for a project (files, chunks, entities, TOON, vectors)."""
+    await kb_chunks.delete_many({"project_id": project_id})
+    await kb_entities.delete_many({"project_id": project_id})
+    await kb_files.delete_many({"project_id": project_id})
+    await kb_toon.delete_one({"project_id": project_id})
+    try:
+        await delete_project_vectors(project_id)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 @router.post("/build")
 async def build_kb(payload: dict):
     project_id = payload.get("project_id")
@@ -247,11 +265,31 @@ async def build_kb(payload: dict):
         upsert=True,
     )
 
+    # Push all chunks into Qdrant for semantic RAG (best-effort, non-blocking failure).
+    all_chunk_dicts: list[dict] = []
+    for f in files:
+        cur = kb_chunks.find({"file_id": f["id"]}, {"_id": 0})
+        async for c in cur:
+            all_chunk_dicts.append({
+                "id": c["id"],
+                "content": c["content"],
+                "filename": f["filename"],
+                "filetype": f["filetype"],
+            })
+    indexed = 0
+    if all_chunk_dicts:
+        logger.info(f"Indexing {len(all_chunk_dicts)} chunks into Qdrant")
+        try:
+            indexed = await qdrant_index(project_id, all_chunk_dicts)
+        except Exception as e:
+            logger.warning(f"Qdrant indexing failed (continuing without RAG): {e}")
+
     return {
         "ok": True,
         "stats": stats,
         "summary": summary,
         "toon_size": len(toon),
+        "indexed": indexed,
     }
 
 

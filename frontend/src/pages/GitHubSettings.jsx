@@ -112,20 +112,20 @@ export default function GitHubSettingsPage() {
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <header className="bg-white border-b border-slate-300 px-6 py-3">
+      <header className="bg-white border-b border-[#E6E6E6] px-6 py-3">
         <div className="text-[10px] uppercase tracking-widest text-slate-500">Settings</div>
-        <h1 className="font-display text-lg font-bold tracking-tight text-[#0A2540] flex items-center">
+        <h1 className="font-display text-lg font-bold tracking-tight text-[#2E2E38] flex items-center">
           <Github className="w-5 h-5 mr-2" />
           GitHub Configuration
           <HelpIcon text="Connect a GitHub repository so LAMA can push the SRS, schema, and generated code as you progress through stages." testId="help-github-page" />
         </h1>
       </header>
 
-      <div className="flex-1 overflow-y-auto mos-scroll p-6 bg-slate-100">
+      <div className="flex-1 overflow-y-auto mos-scroll p-6 bg-[#F6F6FA]">
         <div className="max-w-3xl mx-auto space-y-6">
           {/* Section A — GitHub Config */}
           <section className="mos-panel p-6" data-testid="section-github-config">
-            <h2 className="font-display text-sm font-bold tracking-tight text-[#0A2540] mb-1">Repository Connection</h2>
+            <h2 className="font-display text-sm font-bold tracking-tight text-[#2E2E38] mb-1">Repository Connection</h2>
             <p className="text-xs text-slate-500 mb-4">Saved per project. Token is kept on the server.</p>
 
             <div className="space-y-4">
@@ -180,7 +180,7 @@ export default function GitHubSettingsPage() {
                   data-testid="gh-save-btn"
                   onClick={handleSave}
                   disabled={saving}
-                  className="bg-[#0A2540] text-white hover:bg-[#021122] rounded-sm"
+                  className="bg-[#2E2E38] text-white hover:bg-[#1A1A24] rounded-sm"
                 >
                   {saving ? "Saving…" : "Save GitHub Config"}
                 </Button>
@@ -189,7 +189,7 @@ export default function GitHubSettingsPage() {
                   onClick={handleTest}
                   disabled={testing}
                   variant="outline"
-                  className="bg-white border-slate-300 hover:bg-slate-50 text-slate-700 rounded-sm"
+                  className="bg-white border-[#E6E6E6] hover:bg-slate-50 text-slate-700 rounded-sm"
                 >
                   <Cloud className="w-4 h-4 mr-1" />
                   {testing ? "Testing…" : "Test Connection"}
@@ -209,7 +209,7 @@ export default function GitHubSettingsPage() {
             <section className="mos-panel p-6" data-testid="section-folder-tree">
               <div className="flex items-start justify-between mb-3">
                 <div>
-                  <h2 className="font-display text-sm font-bold tracking-tight text-[#0A2540] flex items-center">
+                  <h2 className="font-display text-sm font-bold tracking-tight text-[#2E2E38] flex items-center">
                     <Folder className="w-4 h-4 mr-1.5" />
                     Target Folder Structure
                     <HelpIcon text="LAMA will push this structure to GitHub in Stage 4 (Code Generation). Schema files are pushed after Stage 2 (Data Model)." testId="help-folder-tree" />
@@ -220,14 +220,14 @@ export default function GitHubSettingsPage() {
                   data-testid="push-srs-btn"
                   onClick={handlePushSRS}
                   disabled={pushing}
-                  className="bg-[#0A2540] text-white hover:bg-[#021122] rounded-sm text-xs h-8"
+                  className="bg-[#2E2E38] text-white hover:bg-[#1A1A24] rounded-sm text-xs h-8"
                 >
                   {pushing ? "Pushing…" : "Push SRS to GitHub"}
                 </Button>
               </div>
               <pre
                 data-testid="folder-tree"
-                className="bg-slate-50 border border-slate-200 rounded-sm p-4 text-[12px] font-mono text-slate-800 overflow-x-auto leading-relaxed"
+                className="bg-slate-50 border border-[#E6E6E6] rounded-sm p-4 text-[12px] font-mono text-slate-800 overflow-x-auto leading-relaxed"
               >
 {FOLDER_TREE}
               </pre>

@@ -21,16 +21,16 @@ export default function Sidebar() {
   return (
     <aside
       data-testid="sidebar"
-      className="w-[260px] shrink-0 h-screen flex flex-col bg-white border-r border-slate-300"
+      className="w-[260px] shrink-0 h-screen flex flex-col bg-white border-r border-[#E6E6E6]"
     >
       {/* Brand + Project (static, single-tenant) */}
-      <div className="px-5 py-5 border-b border-slate-300">
+      <div className="px-5 py-5 border-b border-[#E6E6E6]">
         <div className="flex items-center gap-2 mb-4">
-          <div className="w-9 h-9 bg-[#0A2540] text-white flex items-center justify-center rounded-sm font-display font-bold text-base">
+          <div className="w-9 h-9 bg-[#FFE600] text-[#2E2E38] flex items-center justify-center rounded-sm font-display font-bold text-base">
             L
           </div>
           <div>
-            <div className="font-display font-bold text-xl leading-none tracking-tight text-[#0A2540]" data-testid="brand-name">LAMA</div>
+            <div className="font-display font-bold text-xl leading-none tracking-tight text-[#2E2E38]" data-testid="brand-name">LAMA</div>
             <div className="text-[10px] uppercase tracking-widest text-slate-500 mt-1 leading-tight">Legacy Application<br/>Modernization &amp; Alignment</div>
           </div>
         </div>
@@ -74,10 +74,10 @@ export default function Sidebar() {
                 }}
                 className={`w-full text-left flex items-start gap-2 px-2 py-2 rounded-sm border ${
                   isLocked
-                    ? "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
+                    ? "border-[#E6E6E6] bg-slate-50 text-slate-400 cursor-not-allowed"
                     : isCurrent
-                    ? "border-[#0A2540] bg-[#0A2540] text-white"
-                    : "border-slate-200 hover:bg-slate-100 text-slate-700"
+                    ? "border-[#2E2E38] bg-[#2E2E38] text-white"
+                    : "border-[#E6E6E6] hover:bg-[#F6F6FA] text-slate-700"
                 }`}
               >
                 <div className="mt-0.5">
@@ -87,8 +87,8 @@ export default function Sidebar() {
                   <div className="text-[13px] font-semibold flex items-center justify-between">
                     <span>{s.label}</span>
                     {isLocked && <span className="text-[9px] uppercase bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-sm tracking-wider">Soon</span>}
-                    {isFrozen && <span className="text-[9px] uppercase bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-sm tracking-wider">Frozen</span>}
-                    {isActive && !isCurrent && <Circle className="w-2 h-2 fill-current text-emerald-500" />}
+                    {isFrozen && <span className="text-[9px] uppercase bg-[#FFE600] text-[#2E2E38] px-1.5 py-0.5 rounded-sm tracking-wider font-bold">Frozen</span>}
+                    {isActive && !isCurrent && <Circle className="w-2 h-2 fill-current text-[#FFE600]" />}
                   </div>
                   <div className={`text-[11px] mt-0.5 leading-snug ${isCurrent ? "text-white/80" : "text-slate-500"}`}>{s.desc}</div>
                 </div>
@@ -99,12 +99,12 @@ export default function Sidebar() {
       </div>
 
       {/* Bottom nav */}
-      <div className="px-4 py-3 border-t border-slate-300 space-y-1">
+      <div className="px-4 py-3 border-t border-[#E6E6E6] space-y-1">
         <button
           data-testid="nav-prompts"
           onClick={() => navigate("/prompts")}
           className={`w-full flex items-center gap-2 px-2 py-2 rounded-sm text-[13px] ${
-            location.pathname === "/prompts" ? "bg-slate-100 text-[#0A2540] font-semibold" : "text-slate-600 hover:bg-slate-50"
+            location.pathname === "/prompts" ? "bg-[#F6F6FA] text-[#2E2E38] font-semibold" : "text-slate-600 hover:bg-slate-50"
           }`}
         >
           <Library className="w-4 h-4" />
@@ -115,7 +115,7 @@ export default function Sidebar() {
           data-testid="nav-settings"
           onClick={() => navigate("/settings")}
           className={`w-full flex items-center gap-2 px-2 py-2 rounded-sm text-[13px] ${
-            location.pathname === "/settings" ? "bg-slate-100 text-[#0A2540] font-semibold" : "text-slate-600 hover:bg-slate-50"
+            location.pathname === "/settings" ? "bg-[#F6F6FA] text-[#2E2E38] font-semibold" : "text-slate-600 hover:bg-slate-50"
           }`}
         >
           <SettingsIcon className="w-4 h-4" />
@@ -126,7 +126,7 @@ export default function Sidebar() {
           data-testid="nav-audit"
           onClick={() => navigate("/audit")}
           className={`w-full flex items-center gap-2 px-2 py-2 rounded-sm text-[13px] ${
-            location.pathname === "/audit" ? "bg-slate-100 text-[#0A2540] font-semibold" : "text-slate-600 hover:bg-slate-50"
+            location.pathname === "/audit" ? "bg-[#F6F6FA] text-[#2E2E38] font-semibold" : "text-slate-600 hover:bg-slate-50"
           }`}
         >
           <Activity className="w-4 h-4" />

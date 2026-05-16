@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useProjects } from "@/state/ProjectContext";
 import UploadPanel from "@/components/UploadPanel";
 import ChatPanel from "@/components/ChatPanel";
@@ -10,7 +12,26 @@ export default function DiscoveryPage() {
   const [conversationId, setConversationId] = useState(null);
   const [srsRefreshKey, setSrsRefreshKey] = useState(0);
 
+  const [uploadCollapsed, setUploadCollapsed] = useState(
+    typeof window !== "undefined" && localStorage.getItem("lama:panel:upload") === "true"
+  );
+  const [srsCollapsed, setSrsCollapsed] = useState(
+    typeof window !== "undefined" && localStorage.getItem("lama:panel:srs") === "true"
+  );
+
   const kbReady = (kbStatus?.entities || 0) > 0;
+
+  const toggle = (key) => {
+    if (key === "upload") {
+      const v = !uploadCollapsed;
+      localStorage.setItem("lama:panel:upload", String(v));
+      setUploadCollapsed(v);
+    } else {
+      const v = !srsCollapsed;
+      localStorage.setItem("lama:panel:srs", String(v));
+      setSrsCollapsed(v);
+    }
+  };
 
   const handleConversationUpdated = (cid, srsTriggered) => {
     setConversationId(cid);
@@ -19,7 +40,7 @@ export default function DiscoveryPage() {
 
   if (!active) {
     return (
-      <div className="flex-1 flex items-center justify-center text-slate-500" data-testid="no-project">
+      <div className="flex-1 flex items-center justify-center text-[#747480]" data-testid="no-project">
         <div className="text-center">
           <div className="text-base font-display font-semibold mb-1">No project selected</div>
           <div className="text-sm">Create or pick a project in the sidebar.</div>
@@ -30,30 +51,81 @@ export default function DiscoveryPage() {
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      {/* Stage header */}
-      <header className="bg-white border-b border-slate-300 px-6 py-3 flex items-center justify-between">
+      {/* Stage header with EY yellow accent line */}
+      <header className="bg-white border-b-2 border-[#FFE600] px-6 py-3 flex items-center justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500">Stage 1 of 5</div>
-          <h1 className="font-display text-lg font-bold tracking-tight text-[#0A2540]">Discovery & SRS</h1>
+          <div className="text-[10px] uppercase tracking-widest text-[#747480]">Stage 1 of 5</div>
+          <h1 className="font-display text-lg font-bold tracking-tight text-[#2E2E38]">Discovery &amp; SRS</h1>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-widest text-slate-500">Project</div>
-          <div className="text-sm font-semibold text-slate-800">{active.name}</div>
+          <div className="text-[10px] uppercase tracking-widest text-[#747480]">Project</div>
+          <div className="text-sm font-semibold text-[#2E2E38]">{active.name}</div>
         </div>
       </header>
 
-      {/* 3-panel grid */}
-      <div className="flex-1 grid grid-cols-12 gap-4 p-4 min-h-0 bg-slate-100">
-        <div className="col-span-3 min-h-0 overflow-hidden" data-testid="panel-upload">
-          <UploadPanel projectId={active.id} onKBUpdated={setKbStatus} />
-        </div>
-        <div className="col-span-5 min-h-0" data-testid="panel-chat">
-          <ChatPanel projectId={active.id} kbReady={kbReady} onConversationUpdated={handleConversationUpdated} />
-        </div>
-        <div className="col-span-4 min-h-0" data-testid="panel-srs">
-          <SRSPanel key={srsRefreshKey} projectId={active.id} conversationId={conversationId} kbReady={kbReady} />
-        </div>
-      </div>
+      {/* Resizable 3-panel layout */}
+      <PanelGroup direction="horizontal" className="flex-1 min-h-0 bg-[#F6F6FA]" autoSaveId="lama-discovery">
+        {!uploadCollapsed ? (
+          <>
+            <Panel defaultSize={25} minSize={15} maxSize={40} id="upload" order={1}>
+              <div className="h-full p-2" data-testid="panel-upload">
+                <UploadPanel
+                  projectId={active.id}
+                  onKBUpdated={setKbStatus}
+                  onCollapse={() => toggle("upload")}
+                />
+              </div>
+            </Panel>
+            <PanelResizeHandle className="lama-resize-handle" />
+          </>
+        ) : (
+          <div
+            className="w-8 flex flex-col items-center bg-white border-r border-[#E6E6E6] py-3 gap-2 cursor-pointer hover:bg-[#F6F6FA]"
+            onClick={() => toggle("upload")}
+            data-testid="expand-upload"
+          >
+            <ChevronRight className="w-4 h-4 text-[#747480]" />
+            <span className="text-[10px] text-[#747480] uppercase tracking-widest" style={{ writingMode: "vertical-rl" }}>KB</span>
+          </div>
+        )}
+
+        <Panel
+          defaultSize={uploadCollapsed && srsCollapsed ? 100 : uploadCollapsed || srsCollapsed ? 65 : 42}
+          minSize={25}
+          id="chat"
+          order={2}
+        >
+          <div className="h-full p-2" data-testid="panel-chat">
+            <ChatPanel projectId={active.id} kbReady={kbReady} onConversationUpdated={handleConversationUpdated} />
+          </div>
+        </Panel>
+
+        {!srsCollapsed ? (
+          <>
+            <PanelResizeHandle className="lama-resize-handle" />
+            <Panel defaultSize={33} minSize={20} id="srs" order={3}>
+              <div className="h-full p-2" data-testid="panel-srs">
+                <SRSPanel
+                  key={srsRefreshKey}
+                  projectId={active.id}
+                  conversationId={conversationId}
+                  kbReady={kbReady}
+                  onCollapse={() => toggle("srs")}
+                />
+              </div>
+            </Panel>
+          </>
+        ) : (
+          <div
+            className="w-8 flex flex-col items-center bg-white border-l border-[#E6E6E6] py-3 gap-2 cursor-pointer hover:bg-[#F6F6FA]"
+            onClick={() => toggle("srs")}
+            data-testid="expand-srs"
+          >
+            <ChevronLeft className="w-4 h-4 text-[#747480]" />
+            <span className="text-[10px] text-[#747480] uppercase tracking-widest" style={{ writingMode: "vertical-rl" }}>SRS</span>
+          </div>
+        )}
+      </PanelGroup>
     </div>
   );
 }

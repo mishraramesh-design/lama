@@ -13,11 +13,11 @@ export default function AuditLogPage() {
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <header className="bg-white border-b border-slate-300 px-6 py-3">
+      <header className="bg-white border-b border-[#E6E6E6] px-6 py-3">
         <div className="text-[10px] uppercase tracking-widest text-slate-500">Audit</div>
-        <h1 className="font-display text-lg font-bold tracking-tight text-[#0A2540]">Audit Log</h1>
+        <h1 className="font-display text-lg font-bold tracking-tight text-[#2E2E38]">Audit Log</h1>
       </header>
-      <div className="flex-1 overflow-y-auto mos-scroll p-6 bg-slate-100">
+      <div className="flex-1 overflow-y-auto mos-scroll p-6 bg-[#F6F6FA]">
         <div className="max-w-3xl mx-auto mos-panel">
           {items.length === 0 ? (
             <div className="p-6 text-sm text-slate-500 text-center">
@@ -29,7 +29,7 @@ export default function AuditLogPage() {
               {items.map((it, i) => (
                 <li key={i} className="px-4 py-3 flex items-center justify-between" data-testid={`audit-${i}`}>
                   <div>
-                    <div className="text-sm font-mono text-[#0A2540]">{it.action}</div>
+                    <div className="text-sm font-mono text-[#2E2E38]">{it.action}</div>
                     <div className="text-[11px] text-slate-500">{JSON.stringify(it.details || {})}</div>
                   </div>
                   <div className="text-[11px] text-slate-500">{new Date(it.at).toLocaleString()}</div>

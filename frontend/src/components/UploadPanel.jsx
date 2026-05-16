@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Upload, FileText, Trash2, Hammer, Database, Boxes, Users, GitBranch, FolderSearch } from "lucide-react";
+import { Upload, FileText, Trash2, Hammer, Database, Boxes, Users, GitBranch, FolderSearch, ChevronLeft } from "lucide-react";
 import { uploadKBFiles, listKBFiles, deleteKBFile, buildKB, kbStatus, scanFolder } from "@/lib/api";
 import HelpIcon from "@/components/HelpIcon";
 import { Input } from "@/components/ui/input";
@@ -18,12 +18,12 @@ function MetricCard({ icon: Icon, label, value, testId, help }) {
         </div>
         {help && <HelpIcon text={help} testId={`help-${testId}`} />}
       </div>
-      <div className="font-display text-2xl font-bold mt-1 text-[#0A2540]">{value ?? 0}</div>
+      <div className="font-display text-2xl font-bold mt-1 text-[#2E2E38]">{value ?? 0}</div>
     </div>
   );
 }
 
-export default function UploadPanel({ projectId, onKBUpdated }) {
+export default function UploadPanel({ projectId, onKBUpdated, onCollapse }) {
   const [files, setFiles] = useState([]);
   const [status, setStatus] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -105,7 +105,20 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
             Source Files
             <HelpIcon text="Ingest legacy code by entering the absolute folder path on the server (recommended for large codebases) or by drag-dropping individual files." testId="help-upload" />
           </h3>
-          <span className="text-[10px] text-slate-500 uppercase tracking-wider">{files.length} files</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-[#747480] uppercase tracking-wider">{files.length} files</span>
+            {onCollapse && (
+              <button
+                type="button"
+                onClick={onCollapse}
+                data-testid="collapse-upload"
+                className="text-[#747480] hover:text-[#2E2E38] p-0.5"
+                aria-label="Collapse panel"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Mode A — Folder path */}
@@ -127,7 +140,7 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
               data-testid="scan-folder-btn"
               onClick={handleScanFolder}
               disabled={scanning || !folderPath.trim()}
-              className="bg-[#0A2540] text-white hover:bg-[#021122] rounded-sm text-xs h-9 px-3 whitespace-nowrap"
+              className="bg-[#2E2E38] text-white hover:bg-[#1A1A24] rounded-sm text-xs h-9 px-3 whitespace-nowrap"
             >
               {scanning ? "Scanning…" : "Scan Folder"}
             </Button>
@@ -147,7 +160,7 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
             handleUpload(e.dataTransfer.files);
           }}
           className={`border-2 border-dashed rounded-sm py-4 px-4 text-center cursor-pointer ${
-            dragOver ? "border-[#0A2540] bg-slate-50" : "border-slate-300 hover:border-slate-400"
+            dragOver ? "border-[#2E2E38] bg-slate-50" : "border-[#E6E6E6] hover:border-slate-400"
           }`}
         >
           <Upload className="w-4 h-4 mx-auto text-slate-500 mb-1" />
@@ -167,7 +180,7 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
 
       {/* File list */}
       <div className="mos-panel flex-1 flex flex-col min-h-0">
-        <div className="px-4 py-2.5 border-b border-slate-200 mos-label">Uploaded</div>
+        <div className="px-4 py-2.5 border-b border-[#E6E6E6] mos-label">Uploaded</div>
         <div className="flex-1 overflow-y-auto mos-scroll">
           {files.length === 0 ? (
             <div className="p-4 text-xs text-slate-500">No files yet.</div>
@@ -195,12 +208,12 @@ export default function UploadPanel({ projectId, onKBUpdated }) {
             </ul>
           )}
         </div>
-        <div className="px-4 py-3 border-t border-slate-200">
+        <div className="px-4 py-3 border-t border-[#E6E6E6]">
           <Button
             data-testid="build-kb-btn"
             disabled={files.length === 0 || building}
             onClick={handleBuild}
-            className="w-full bg-[#0A2540] text-white hover:bg-[#021122] rounded-sm font-semibold"
+            className="w-full bg-[#2E2E38] text-white hover:bg-[#1A1A24] rounded-sm font-semibold"
           >
             <Hammer className="w-4 h-4 mr-2" />
             {building ? "Building…" : "Build Knowledge Base"}
