@@ -811,14 +811,8 @@ async def generate_entity_graph(payload: dict):
     project_id = payload.get("project_id")
     if not project_id:
         raise HTTPException(400, "project_id required")
-    discovery_ctx = await require_stage_context(project_id, "Discovery", "DataModel")
-
-    # Fast path: cached ER from Discovery freeze
-    er = (discovery_ctx.get("outputs", {}) or {}).get("er_model")
-    if er and er.get("nodes"):
-        return er
-
-    # Fallback: live compute (re-uses the SRS helper)
+    await require_stage_context(project_id, "Discovery", "DataModel")
+    # Always compute live (the frozen Discovery cache omits full column/type detail).
     from routes.srs import _gen_entity_model
     r = await _gen_entity_model(project_id)
     return json.loads(r["content"])

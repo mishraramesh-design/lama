@@ -9,9 +9,9 @@ import { toast } from "sonner";
 const STAGES = [
   { key: "Discovery", label: "1. Discovery & SRS", icon: BookOpen, desc: "Upload legacy files, ask gap questions, freeze SRS.", path: "/" },
   { key: "DataModel", label: "2. Data Model", icon: Database, desc: "OLTP + OLAP DDL, Bus Matrix, migration scripts.", path: "/data-model" },
-  { key: "Architecture", label: "3. Architecture", icon: Boxes, desc: "Decompose into microservices.", path: "/" },
-  { key: "CodeGen", label: "4. Code Generation", icon: Code2, desc: "Generate target code + unit tests.", path: "/" },
-  { key: "Living", label: "5. Living System", icon: Activity, desc: "Selenium tests, SRS diffs, monitoring.", path: "/" },
+  { key: "Architecture", label: "3. Architecture", icon: Boxes, desc: "Decompose into microservices.", path: "/architecture" },
+  { key: "CodeGen", label: "4. Code Generation", icon: Code2, desc: "Generate target code + unit tests.", path: "/code-gen" },
+  { key: "Living", label: "5. Living System", icon: Activity, desc: "Selenium tests, SRS diffs, monitoring.", path: "/living" },
 ];
 
 export default function Sidebar() {
