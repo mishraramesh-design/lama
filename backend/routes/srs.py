@@ -397,7 +397,19 @@ async def generate_srs_stream(payload: dict):
                 + "\n\n"
             )
 
-            r = await _gen_one_section(cfg, proj, full_toon, summary, convo_text, model)
+            # Run the LLM call as a task so we can emit keepalive pings while it runs.
+            gen_task = asyncio.create_task(
+                _gen_one_section(cfg, proj, full_toon, summary, convo_text, model, project_id=project_id)
+            )
+            while not gen_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(gen_task), timeout=10.0)
+                except asyncio.TimeoutError:
+                    # SSE comment ping — keeps proxies / browsers from dropping the connection.
+                    yield ": ping\n\n"
+                except Exception:
+                    break
+            r = await gen_task
             sections[cfg["key"]] = r["content"]
             total_tokens += r["tokens"]
 
