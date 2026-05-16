@@ -20,11 +20,44 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(
     typeof window !== "undefined" && localStorage.getItem("lama:panel:sidebar") === "true"
   );
+  const [pipeline, setPipeline] = useState({});
+
+  useEffect(() => {
+    if (!active?.id) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await getPipelineStatus(active.id);
+        if (!cancelled) setPipeline(data || {});
+      } catch (_) { /* ignore */ }
+    };
+    load();
+    const t = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [active?.id]);
 
   const toggle = () => {
     const v = !collapsed;
     localStorage.setItem("lama:panel:sidebar", String(v));
     setCollapsed(v);
+  };
+
+  // Resolve per-stage status combining project.stage_status + pipeline (StageContext)
+  const stageStatus = (key, idx) => {
+    const ctx = pipeline[key];
+    if (ctx?.frozen) return "frozen";
+    const projStatus = active?.stage_status?.[key];
+    if (projStatus === "frozen") return "frozen";
+    if (projStatus === "available") return "available";
+    if (projStatus === "active") return "active";
+    // Auto-promote: if previous stage is frozen, this one becomes "available"
+    if (idx > 0) {
+      const prev = STAGES[idx - 1];
+      if (pipeline[prev.key]?.frozen || active?.stage_status?.[prev.key] === "frozen") {
+        return "available";
+      }
+    }
+    return projStatus || "locked";
   };
 
   // ----- Collapsed (rail) mode -----
@@ -45,7 +78,7 @@ export default function Sidebar() {
         </button>
         <div className="flex flex-col items-center gap-1 mt-3">
           {STAGES.map((s, idx) => {
-            const status = active?.stage_status?.[s.key] || "locked";
+            const status = stageStatus(s.key, idx);
             const isLocked = status === "locked";
             const isFrozen = status === "frozen";
             const isCurrent = location.pathname === "/" && idx === 0 && !isLocked;
@@ -61,6 +94,8 @@ export default function Sidebar() {
                     ? "border-[#E6E6E6] bg-[#F6F6FA] text-[#747480] cursor-not-allowed"
                     : isCurrent
                     ? "border-[#2E2E38] bg-[#2E2E38] text-white"
+                    : isFrozen
+                    ? "border-[#FFE600] bg-[#FFFCE6] text-[#2E2E38]"
                     : "border-[#E6E6E6] hover:bg-[#F6F6FA] text-[#2E2E38]"
                 }`}
               >

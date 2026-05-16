@@ -19,3 +19,4 @@ prompts = db.prompts
 project_prompts = db.project_prompts
 freeze_gates = db.freeze_gates
 audit_log = db.audit_log
+stage_context = db.stage_context

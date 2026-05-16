@@ -155,3 +155,22 @@ class GithubPushRequest(BaseModel):
     repo_url: str
     token: str
     branch: str = "main"
+
+
+# ---------- Pipeline / Stage handoff ----------
+class StageContext(BaseModel):
+    """Persisted snapshot of everything a stage produced.
+    Loaded by the NEXT stage as its primary input context.
+    This is the pipeline handoff mechanism between all 5 stages."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    project_id: str
+    stage: str  # Discovery | DataModel | Architecture | CodeGen | Living
+    frozen_at: str = ""
+    frozen_by: str = "system"
+    version: int = 1
+    outputs: Dict[str, Any] = Field(default_factory=dict)
+    toon_summary: str = ""
+    sources: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)

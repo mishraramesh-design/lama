@@ -8,6 +8,8 @@ const api = axios.create({ baseURL: API, timeout: 600000 });
 // Projects
 export const listProjects = () => api.get("/projects").then((r) => r.data);
 export const getProject = (id) => api.get(`/projects/${id}`).then((r) => r.data);
+export const getPipelineStatus = (projectId) =>
+  api.get(`/projects/${projectId}/pipeline`).then((r) => r.data);
 
 // KB
 export const scanFolder = (projectId, folderPath) =>

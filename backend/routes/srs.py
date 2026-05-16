@@ -499,8 +499,8 @@ async def update_section(project_id: str, payload: SRSSectionUpdate):
 async def freeze_srs(payload: dict):
     project_id = payload.get("project_id")
     user = payload.get("user", "system")
-    doc = await srs_documents.find_one({"project_id": project_id}, {"_id": 0})
-    if not doc:
+    srs_doc = await srs_documents.find_one({"project_id": project_id}, {"_id": 0})
+    if not srs_doc:
         raise HTTPException(404, "SRS not found")
     now = datetime.now(timezone.utc).isoformat()
     await srs_documents.update_one(
@@ -521,6 +521,117 @@ async def freeze_srs(payload: dict):
         "at": now,
         "details": {"by": user},
     })
+
+    # ------------------------------------------------------------------
+    # Pipeline handoff: persist a StageContext snapshot for downstream stages.
+    # Best-effort — never fail the freeze if the snapshot build hiccups.
+    # ------------------------------------------------------------------
+    try:
+        entities = await kb_entities.find({"project_id": project_id}, {"_id": 0}).to_list(100000)
+        toon_doc = await kb_toon.find_one({"project_id": project_id}, {"_id": 0})
+        proj = await projects.find_one({"id": project_id}, {"_id": 0})
+
+        owl = export_owl(proj or {}, entities, (srs_doc or {}).get("sections", {}))
+
+        domain_map = owl.get("data_model_hints", {}).get("domains", {})
+        high_risk = owl.get("data_model_hints", {}).get("high_risk_tables", [])
+        boundaries = owl.get("microservice_hints", {}).get("suggested_boundaries", [])
+        stats = (toon_doc or {}).get("stats", {})
+
+        tables_only = [e for e in entities if e.get("type") == "TABLE"]
+        classes_only = [e for e in entities if e.get("type") == "CLASS"]
+        key_tables = sorted(tables_only, key=lambda t: len(t.get("fks") or []), reverse=True)[:80]
+        key_classes = sorted(classes_only, key=lambda c: len(c.get("methods") or []), reverse=True)[:60]
+        toon_summary = toon_serialise(key_tables + key_classes)[:8000]
+
+        er_nodes = []
+        er_edges = []
+        edge_set: set[str] = set()
+        for e in tables_only:
+            parts = e.get("name", "").split("_")
+            domain = parts[0] if len(parts) > 1 else "other"
+            er_nodes.append({
+                "id": e.get("name"),
+                "name": e.get("name"),
+                "pk": e.get("pk", ""),
+                "domain": domain,
+                "col_count": len(e.get("columns") or []),
+                "fk_count": len(e.get("fks") or []),
+            })
+            for fk in (e.get("fks") or []):
+                key = f"{e.get('name')}.{fk.get('column')}->{fk.get('ref_table')}"
+                if key not in edge_set:
+                    edge_set.add(key)
+                    er_edges.append({
+                        "from_table": e.get("name"),
+                        "from_col": fk.get("column"),
+                        "to_table": fk.get("ref_table"),
+                        "type": "fk",
+                    })
+
+        ctx = StageContext(
+            project_id=project_id,
+            stage="Discovery",
+            frozen_at=now,
+            frozen_by=user,
+            version=(srs_doc or {}).get("version", 1),
+            outputs={
+                "srs_sections": (srs_doc or {}).get("sections", {}),
+                "srs_version": (srs_doc or {}).get("version", 1),
+                "kb_summary": stats,
+                "domain_map": {
+                    k: {
+                        "tables": v.get("tables", [])[:30],
+                        "classes": list(set(v.get("classes", [])))[:15],
+                    }
+                    for k, v in domain_map.items()
+                },
+                "high_risk_entities": high_risk[:20],
+                "suggested_service_boundaries": boundaries,
+                "er_model": {
+                    "nodes": er_nodes,
+                    "edges": er_edges,
+                    "stats": {
+                        "total_tables": len(er_nodes),
+                        "total_relationships": len(er_edges),
+                        "domains": len(domain_map),
+                    },
+                },
+                "owl_export_endpoint": f"/api/kb/{project_id}/owl-export",
+                "data_model_hints": owl.get("data_model_hints", {}),
+                "microservice_hints": owl.get("microservice_hints", {}),
+            },
+            toon_summary=toon_summary,
+            sources={
+                "kb_entities_count": len(entities),
+                "kb_stats": stats,
+                "srs_version": (srs_doc or {}).get("version", 1),
+                "model_used": "multi-model",
+                "prompts_used": ["srs.generate", "srs.gap_question"],
+            },
+        )
+
+        await stage_context_col.update_one(
+            {"project_id": project_id, "stage": "Discovery"},
+            {"$set": ctx.model_dump()},
+            upsert=True,
+        )
+        await projects.update_one(
+            {"id": project_id},
+            {"$set": {
+                "stage_status.DataModel": "available",
+                "updated_at": now,
+            }},
+        )
+    except Exception as exc:
+        # Pipeline handoff is best-effort — surface in audit log but don't fail the freeze.
+        await audit_log.insert_one({
+            "action": "stage_context.build_failed",
+            "project_id": project_id,
+            "at": now,
+            "details": {"stage": "Discovery", "error": str(exc)[:500]},
+        })
+
     return {"ok": True, "frozen_at": now}
 
 

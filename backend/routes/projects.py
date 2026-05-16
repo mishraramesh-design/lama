@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from typing import List
 from datetime import datetime, timezone
 
-from db import projects, audit_log
+from db import projects, audit_log, stage_context as stage_context_col
 from models import Project, ProjectCreate
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -34,3 +34,24 @@ async def get_project(project_id: str):
     if not doc:
         raise HTTPException(404, "Project not found")
     return Project(**doc)
+e")
+async def get_pipeline_status(project_id: str):
+    """Per-stage pipeline status — used by the sidebar to render lock / available / frozen badges."""
+    stages = ["Discovery", "DataModel", "Architecture", "CodeGen", "Living"]
+    result: dict = {}
+    for stage in stages:
+        doc = await stage_context_col.find_one(
+            {"project_id": project_id, "stage": stage},
+            {"_id": 0, "outputs.srs_sections": 0, "toon_summary": 0},
+        )
+        if doc:
+            result[stage] = {
+                "frozen": True,
+                "frozen_at": doc.get("frozen_at"),
+                "version": doc.get("version", 1),
+                "sources": doc.get("sources", {}),
+                "output_keys": list(doc.get("outputs", {}).keys()),
+            }
+        else:
+            result[stage] = {"frozen": False}
+    return result
