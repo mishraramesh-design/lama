@@ -21,7 +21,7 @@ class GithubConfig(BaseModel):
 
 
 class GithubTestRequest(BaseModel):
-    repo_url: str
+    repo_url: str = ""
     token: str
 
 
