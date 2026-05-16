@@ -6,6 +6,8 @@ import { ProjectProvider } from "@/state/ProjectContext";
 import Sidebar from "@/components/Sidebar";
 import DiscoveryPage from "@/pages/Discovery";
 import DataModelPage from "@/pages/DataModel";
+import ArchitecturePage from "@/pages/Architecture";
+import CodeGenPage from "@/pages/CodeGen";
 import StagePlaceholderPage from "@/pages/StagePlaceholder";
 import PromptLibraryPage from "@/pages/PromptLibrary";
 import AuditLogPage from "@/pages/AuditLog";
@@ -28,8 +30,8 @@ function App() {
         <Routes>
           <Route path="/" element={<Shell><DiscoveryPage /></Shell>} />
           <Route path="/data-model" element={<Shell><DataModelPage /></Shell>} />
-          <Route path="/architecture" element={<Shell><StagePlaceholderPage stage="Architecture" /></Shell>} />
-          <Route path="/code-gen" element={<Shell><StagePlaceholderPage stage="CodeGen" /></Shell>} />
+          <Route path="/architecture" element={<Shell><ArchitecturePage /></Shell>} />
+          <Route path="/code-gen" element={<Shell><CodeGenPage /></Shell>} />
           <Route path="/living" element={<Shell><StagePlaceholderPage stage="Living" /></Shell>} />
           <Route path="/prompts" element={<Shell><PromptLibraryPage /></Shell>} />
           <Route path="/settings" element={<Shell><GitHubSettingsPage /></Shell>} />

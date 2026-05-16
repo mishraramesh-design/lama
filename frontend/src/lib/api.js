@@ -98,4 +98,60 @@ export const factoryReset = (projectId) =>
 export const resetStage2 = (projectId) =>
   api.post(`/data-model/${projectId}/reset`).then((r) => r.data);
 
+// Architecture — Stage 3
+export const startArchRecommend = (projectId, model, message) =>
+  api.post("/architecture/jobs/start/recommend", { project_id: projectId, model, message }).then((r) => r.data);
+export const startArchHld = (projectId, model) =>
+  api.post("/architecture/jobs/start/hld", { project_id: projectId, model }).then((r) => r.data);
+export const startArchLld = (projectId, model) =>
+  api.post("/architecture/jobs/start/lld", { project_id: projectId, model }).then((r) => r.data);
+export const startArchSequence = (projectId, model) =>
+  api.post("/architecture/jobs/start/sequence", { project_id: projectId, model }).then((r) => r.data);
+export const getArchJob = (jobId) =>
+  api.get(`/architecture/jobs/${jobId}`).then((r) => r.data);
+export const approveServiceMap = (projectId, approved = true, overrides = []) =>
+  api.post("/architecture/approve", { project_id: projectId, approved, overrides }).then((r) => r.data);
+export const sendArchChat = (payload) =>
+  api.post("/architecture/chat", payload).then((r) => r.data);
+export const applyArchChanges = (projectId, changes, conversationMessageId) =>
+  api.post(`/architecture/${projectId}/apply-changes`, { changes, conversation_message_id: conversationMessageId }).then((r) => r.data);
+export const getArchArtifacts = (projectId) =>
+  api.get(`/architecture/${projectId}/artifacts`).then((r) => r.data);
+export const getArchArtifact = (projectId, artifactId) =>
+  api.get(`/architecture/${projectId}/artifact/${artifactId}`).then((r) => r.data);
+export const updateArchArtifact = (projectId, artifactId, content) =>
+  api.put(`/architecture/${projectId}/artifact/${artifactId}`, { content }).then((r) => r.data);
+export const freezeArchArtifact = (projectId, artifactId) =>
+  api.post(`/architecture/${projectId}/artifact/${artifactId}/freeze`).then((r) => r.data);
+export const downloadArchArtifactUrl = (projectId, artifactId) =>
+  `${API}/architecture/${projectId}/artifact/${artifactId}/download`;
+export const resetArch = (projectId) =>
+  api.post(`/architecture/${projectId}/reset`).then((r) => r.data);
+
+// CodeGen — Stage 4
+export const startCodegenJob = (projectId, model, serviceName) =>
+  api.post("/codegen/jobs/start/generate", { project_id: projectId, model, service_name: serviceName || undefined }).then((r) => r.data);
+export const getCodegenJob = (jobId) =>
+  api.get(`/codegen/jobs/${jobId}`).then((r) => r.data);
+export const listCodegenFiles = (projectId) =>
+  api.get(`/codegen/${projectId}/files`).then((r) => r.data);
+export const getCodegenFile = (projectId, fileId) =>
+  api.get(`/codegen/${projectId}/file/${fileId}`).then((r) => r.data);
+export const updateCodegenFile = (projectId, fileId, content) =>
+  api.put(`/codegen/${projectId}/file/${fileId}`, { content }).then((r) => r.data);
+export const downloadCodegenZipUrl = (projectId) =>
+  `${API}/codegen/${projectId}/download-zip`;
+export const startCodegenZipDownload = (projectId) =>
+  api.post(`/codegen/${projectId}/download-zip`, null, { responseType: "blob" }).then((r) => r.data);
+export const startGithubPushJob = (projectId) =>
+  api.post("/codegen/jobs/start/github-push", { project_id: projectId }).then((r) => r.data);
+export const sendCodegenChat = (payload) =>
+  api.post("/codegen/chat", payload).then((r) => r.data);
+export const applyCodegenFileChange = (projectId, fileId, newContent, conversationMessageId) =>
+  api.post(`/codegen/${projectId}/apply-file-change`, { file_id: fileId, new_content: newContent, conversation_message_id: conversationMessageId }).then((r) => r.data);
+export const freezeCodegen = (projectId) =>
+  api.post(`/codegen/${projectId}/freeze`).then((r) => r.data);
+export const resetCodegen = (projectId) =>
+  api.post(`/codegen/${projectId}/reset`).then((r) => r.data);
+
 export default api;
