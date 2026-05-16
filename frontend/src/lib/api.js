@@ -3,7 +3,7 @@ import axios from "axios";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-const api = axios.create({ baseURL: API, timeout: 120000 });
+const api = axios.create({ baseURL: API, timeout: 600000 });
 
 // Projects
 export const listProjects = () => api.get("/projects").then((r) => r.data);
