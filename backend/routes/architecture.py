@@ -443,6 +443,7 @@ async def start_hld(payload: dict):
     project_id = payload.get("project_id")
     if not project_id:
         raise HTTPException(400, "project_id required")
+    await require_stage_context(project_id, "DataModel", "Architecture")
     model = payload.get("model") or "deepseek/deepseek-chat"
     jid = _new_job(project_id, "hld")
     asyncio.create_task(_run_hld_job(jid, project_id, model))
@@ -525,6 +526,7 @@ async def start_lld(payload: dict):
     project_id = payload.get("project_id")
     if not project_id:
         raise HTTPException(400, "project_id required")
+    await require_stage_context(project_id, "DataModel", "Architecture")
     model = payload.get("model") or "deepseek/deepseek-chat"
     jid = _new_job(project_id, "lld")
     asyncio.create_task(_run_lld_job(jid, project_id, model))
@@ -598,6 +600,7 @@ async def start_seq(payload: dict):
     project_id = payload.get("project_id")
     if not project_id:
         raise HTTPException(400, "project_id required")
+    await require_stage_context(project_id, "DataModel", "Architecture")
     model = payload.get("model") or "deepseek/deepseek-chat"
     jid = _new_job(project_id, "sequence")
     asyncio.create_task(_run_seq_job(jid, project_id, model))

@@ -442,7 +442,10 @@ async def _run_github_push_job(jid: str, project_id: str):
             except Exception:
                 r = repo.create_file(f["file_path"], f"LAMA codegen: {f['file_path']}",
                                      f["content"], branch=branch)
-            last_sha = r.get("commit").sha if isinstance(r, dict) else getattr(r.get("commit"), "sha", "") if r else ""
+            try:
+                last_sha = r["commit"].sha if r and r.get("commit") else last_sha
+            except Exception:
+                last_sha = last_sha
         await codegen_runs.update_one({"id": jid}, {"$set": {"github_commit": last_sha}})
         _job_finish(jid, "complete", step="Done", pct=100,
                     result={"commit_sha": last_sha, "repo_url": cfg["repo_url"], "files": len(files)})

@@ -116,16 +116,27 @@ Full-stack legacy application migration assistant. FastAPI backend + React front
 - 🟢 Stage 2 reset + Factory reset: working with typed-confirmation modals.
 
 ## Backlog
-**P0** — None (Prompt 2/4 complete).
-**P1 (User-driven, upcoming Prompts 3-4 in series)** — Wait for next prompt from user.
-**P1** — Implement functional backends for pipeline stages 2-5 (DataModel, Architecture, CodeGen, Living). Currently UI placeholders.
-**P1** — Un-stub GitHub code push for CodeGen stage.
-**P1** — Replace `dict` payloads with Pydantic models on `/api/kb/scan-folder`, `/api/kb/build`, `/api/srs/generate|freeze|unfreeze`.
+**P0** — None (Stages 3 + 4 frontends complete).
+**P1** — Stage 5 (Living): backend + frontend (Selenium tests, SRS-drift detection, runtime observability).
+**P1** — End-to-end smoke of Stage 3 (recommend → HLD → LLD → sequence → freeze) and Stage 4 (generate → ZIP → push) on the seeded project (real LLM calls — burns OpenRouter tokens; do on user request).
+**P1** — Verify CodeGen GitHub-push end-to-end aligned with Stage 4 expectations (PyGithub commit-sha extraction simplified in iteration 8).
+**P1** — Replace `dict` payloads with Pydantic models on `/api/kb/scan-folder`, `/api/kb/build`, `/api/srs/generate|freeze|unfreeze`, plus the new `/api/architecture/*` and `/api/codegen/*` POST bodies.
+**P2** — Sidebar `stage-CodeGen-badge-locked` / `stage-CodeGen-badge-soon` data-testid alignment.
 **P2** — Fix nested-button HTML in `Sidebar.jsx` (HelpIcon Radix Tooltip trigger inside `<button>` causes React hydration warning).
 **P2** — Surface SRS auto-trigger failures in chat response (currently silently `false`).
 **P2** — Migrate from deprecated `@app.on_event` to FastAPI `lifespan`.
 **P2** — `GET /api/srs/{id}` return 404 (or `exists` flag) when no SRS.
 **P2** — Streaming chat responses.
+
+**Iteration 8 (this iteration — Stage 3 Architecture + Stage 4 CodeGen FRONTENDS):**
+- ✅ **Frontend deps**: `mermaid@11`, `@monaco-editor/react` added via yarn.
+- ✅ **Backend wiring**: `routes/architecture.py` + `routes/codegen.py` registered in `server.py`. Sync `require_stage_context` gate added to `start_hld/start_lld/start_seq` so callers fail fast at job creation rather than only via polling. PyGithub `r["commit"].sha` extraction simplified (removed dead `isinstance(dict)` branch).
+- ✅ **`/app/frontend/src/lib/api.js`**: Added 24 new helper exports for `architecture/*` (recommend / hld / lld / sequence job starters, getArchJob, approveServiceMap, sendArchChat, applyArchChanges, artifact CRUD/freeze/download, reset) and `codegen/*` (generate job, getCodegenJob, files CRUD, downloadCodegenZipUrl + blob downloader, github-push job, sendCodegenChat, applyCodegenFileChange, freeze, reset).
+- ✅ **`/app/frontend/src/pages/Architecture.jsx`** (~430 lines): horizontal `PanelGroup` (chat | artifact viewer). Tabs: service_map / hld / lld / sequence_diagrams / api_contracts. Generate buttons (Recommend, HLD, LLD, Sequence) with in-page job progress bars (poll every 2s, no SSE — bypasses K8s 60s ingress timeout). Mermaid block renderer in HLD/LLD/Sequence markdown. Service-map JSON pretty viewer with per-service cards. Chat with `[HLD_CHANGE]`/`[ARCH_CHANGE]`/`[SERVICE_ADD]`/`[SERVICE_REMOVE:...]` detection + Apply button. Edit/Freeze/Approve/Download/Reset flows. Locked banner when DataModel not frozen.
+- ✅ **`/app/frontend/src/pages/CodeGen.jsx`** (~430 lines): 3-pane horizontal `PanelGroup` (file tree | Monaco editor | code chat). File tree flattened (non-recursive — visual-edits babel plugin bug workaround). Per-service filter + per-service regen. Generate-all (background job + progress bar). Monaco editor with language auto-detect by extension; Edit/Save flow; chat with `[FILE_CHANGE:path]` detection + per-block Apply button. ZIP download (blob) + GitHub-push job. Freeze CodeGen (unlocks Living). Reset modal.
+- ✅ **`App.js`**: `/architecture` and `/code-gen` now route to the real pages (replacing `StagePlaceholder`).
+- ✅ **Testing**: 18/18 backend pytest tests pass (test_arch_codegen.py — gates, artifacts, chat, freeze, reset, job 404, download-zip empty). Frontend smoke: Architecture page renders all tabs / generate buttons / chat / reset modal; CodeGen page renders correctly-locked state with CTA to /architecture; Sidebar Architecture badge = "Ready", CodeGen badge = "Soon"; no console errors.
+
 
 ## Next Phases
 - **Stage 2 — DataModel**: target schema normalisation; push `schema/*.sql` to GitHub.
