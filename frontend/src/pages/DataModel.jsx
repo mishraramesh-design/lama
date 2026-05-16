@@ -28,8 +28,9 @@ import { useProjects } from "@/state/ProjectContext";
 import {
   API,
   generateOLTPUrl,
-  generateOLAPUrl,
-  generateScriptsUrl,
+  startOLAPJob,
+  startScriptsJob,
+  getDataModelJob,
   generateBusMatrix,
   generateEntityGraph,
   getDataModelArtifacts,
@@ -788,23 +789,32 @@ export default function DataModelPage() {
     }
   };
 
+  // Poll a backend job every 2s until terminal status. Returns the final job object.
+  const pollJob = async (jobId, onProgress) => {
+    while (true) {
+      const job = await getDataModelJob(jobId);
+      onProgress?.(job);
+      if (job.status === "complete" || job.status === "error") return job;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  };
+
   const generateOLAP = async () => {
     setOlapGenerating(true);
     setOlapLog({ step: "Starting…", pct: 0 });
     try {
-      await runSse(generateOLAPUrl(), { project_id: active.id }, (data) => {
-        if (data.type === "progress" || data.type === "start") {
-          setOlapLog({ step: data.step || data.message, pct: data.pct || 10 });
-        } else if (data.type === "complete") {
-          toast.success(`OLAP DDL generated (${data.dims} dims, ${data.facts} facts)`);
-          setOlapLog(null);
-        } else if (data.type === "error") {
-          toast.error("OLAP generation failed", { description: data.message });
-        }
+      const { job_id } = await startOLAPJob(active.id);
+      const final = await pollJob(job_id, (j) => {
+        setOlapLog({ step: j.step || "Running…", pct: j.pct || 0 });
       });
+      if (final.status === "complete") {
+        toast.success(`OLAP DDL generated (${final.result.dims} dims, ${final.result.facts} facts)`);
+      } else {
+        toast.error("OLAP generation failed", { description: final.error || "Unknown error" });
+      }
       await loadArtifacts();
     } catch (e) {
-      toast.error("OLAP generation failed", { description: e.message });
+      toast.error("OLAP generation failed", { description: e.response?.data?.detail || e.message });
     } finally {
       setOlapGenerating(false);
       setOlapLog(null);
@@ -828,18 +838,18 @@ export default function DataModelPage() {
     setScriptsGenerating(true);
     setScriptsLog("Starting…");
     try {
-      await runSse(generateScriptsUrl(), { project_id: active.id }, (data) => {
-        if (data.type === "script_start") setScriptsLog(`Generating ${data.script}…`);
-        else if (data.type === "script_complete") setScriptsLog(`${data.script} ✓`);
-        else if (data.type === "script_error") toast.error(`Script error: ${data.script}`, { description: data.message });
-        else if (data.type === "complete") {
-          toast.success("All migration scripts generated");
-          setScriptsLog(null);
-        }
+      const { job_id } = await startScriptsJob(active.id);
+      const final = await pollJob(job_id, (j) => {
+        setScriptsLog(`${j.step} (${j.pct}%)`);
       });
+      if (final.status === "complete") {
+        toast.success("All migration scripts generated");
+      } else {
+        toast.error("Scripts failed", { description: final.error || "Unknown error" });
+      }
       await loadArtifacts();
     } catch (e) {
-      toast.error("Scripts failed", { description: e.message });
+      toast.error("Scripts failed", { description: e.response?.data?.detail || e.message });
     } finally {
       setScriptsGenerating(false);
       setTimeout(() => setScriptsLog(null), 2500);

@@ -39,6 +39,54 @@ logger = logging.getLogger("lama.datamodel")
 
 router = APIRouter(prefix="/data-model", tags=["data-model"])
 
+# In-memory job registry for long-running tasks that exceed K8s ingress timeout (~60s).
+# Replaces SSE for OLAP + migration-scripts; the frontend polls /jobs/{id} every ~2s.
+# Restarting the backend clears all jobs — that's intentional, no need for persistence.
+_JOBS: dict = {}
+_JOB_TTL_SEC = 60 * 60  # keep job records around for an hour after completion
+
+
+def _new_job(project_id: str, kind: str) -> str:
+    import uuid
+    import time as _time
+    jid = uuid.uuid4().hex
+    _JOBS[jid] = {
+        "id": jid,
+        "project_id": project_id,
+        "kind": kind,
+        "status": "queued",     # queued | running | complete | error
+        "step": "Queued…",
+        "pct": 0,
+        "started_at": _time.time(),
+        "ended_at": None,
+        "error": None,
+        "result": {},
+    }
+    # opportunistic cleanup of old jobs
+    now = _time.time()
+    stale = [k for k, v in _JOBS.items() if v.get("ended_at") and now - v["ended_at"] > _JOB_TTL_SEC]
+    for k in stale:
+        _JOBS.pop(k, None)
+    return jid
+
+
+def _job_update(jid: str, **kw):
+    job = _JOBS.get(jid)
+    if not job:
+        return
+    job.update(kw)
+
+
+def _job_finish(jid: str, status: str, **kw):
+    import time as _time
+    job = _JOBS.get(jid)
+    if not job:
+        return
+    job["status"] = status
+    job["ended_at"] = _time.time()
+    job.update(kw)
+
+
 
 # -----------------------------------------------------------
 # Helpers
@@ -91,6 +139,252 @@ async def _strip_md_fence(text: str) -> str:
         if t.endswith("```"):
             t = t[:-3].rstrip()
     return t
+
+
+async def _wait_for_llm_with_progress(gen_task, label: str, start_pct: int = 40, end_pct: int = 88):
+    """Async generator that yields SSE progress events while gen_task runs.
+
+    Replaces silent `: ping` keepalives with VISIBLE progress events showing
+    elapsed time, so the UI never looks stuck during a 60-120s LLM call.
+    Yields events; caller is responsible for awaiting gen_task at end.
+    """
+    import time as _time
+    started = _time.time()
+    while not gen_task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(gen_task), timeout=4.0)
+        except asyncio.TimeoutError:
+            elapsed = int(_time.time() - started)
+            # Asymptotic curve: rises fast at first, then slows toward end_pct
+            pct = min(end_pct, start_pct + int((end_pct - start_pct) * (1 - 1 / (1 + elapsed / 30))))
+            yield f"data: {json.dumps({'type': 'progress', 'step': f'{label} ({elapsed}s elapsed)', 'pct': pct})}\n\n"
+        except Exception:
+            break
+
+
+
+# -----------------------------------------------------------
+# JOB-based generation (bypass K8s ingress 60s timeout)
+# Frontend POSTs to /jobs/start/{kind}, gets a job_id, then polls /jobs/{id}.
+# -----------------------------------------------------------
+async def _run_olap_job(job_id: str, project_id: str, model: str):
+    """Background OLAP generation. Mirrors generate_olap but updates _JOBS instead of yielding SSE."""
+    import time as _time
+    try:
+        _job_update(job_id, status="running", step="Loading context…", pct=5)
+        discovery_ctx = await require_stage_context(project_id, "Discovery", "DataModel")
+        proj = await projects.find_one({"id": project_id}, {"_id": 0})
+        oltp_art = await data_models.find_one({"project_id": project_id, "type": "oltp_ddl"}, {"_id": 0})
+        if not oltp_art:
+            _job_finish(job_id, "error", error="Generate OLTP DDL first.")
+            return
+
+        bus_art = await data_models.find_one({"project_id": project_id, "type": "bus_matrix"}, {"_id": 0})
+        srs_functional = (discovery_ctx.get("outputs", {}).get("srs_sections", {}) or {}).get("functional_requirements", "")[:6000]
+
+        _job_update(job_id, step="Building prompt…", pct=15)
+        template = await _get_prompt(project_id, "datamodel.olap")
+        if not template:
+            _job_finish(job_id, "error", error="datamodel.olap prompt missing.")
+            return
+
+        system_prompt = _safe_format(
+            template,
+            project_name=proj.get("name", ""),
+            oltp_ddl=oltp_art.get("content", "")[:14000],
+            srs_functional=srs_functional,
+            bus_matrix=(bus_art or {}).get("content", "")[:4000],
+        )
+
+        _job_update(job_id, step="Calling LLM (60-120s typical)…", pct=25)
+        gen_task = asyncio.create_task(
+            chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate the complete OLAP star-schema DDL now."},
+                ],
+                model=model,
+                temperature=0.15,
+                max_tokens=14000,
+                timeout=300.0,
+            )
+        )
+        started = _time.time()
+        while not gen_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(gen_task), timeout=3.0)
+            except asyncio.TimeoutError:
+                elapsed = int(_time.time() - started)
+                pct = min(88, 25 + int(63 * (1 - 1 / (1 + elapsed / 25))))
+                _job_update(job_id, step=f"LLM generating ({elapsed}s elapsed)…", pct=pct)
+            except Exception:
+                break
+
+        try:
+            result = await gen_task
+        except Exception as e:
+            _job_finish(job_id, "error", error=f"LLM call failed: {e}")
+            return
+
+        content = await _strip_md_fence(result.get("content", ""))
+        if not content.strip():
+            _job_finish(job_id, "error", error="LLM returned empty DDL.")
+            return
+
+        _job_update(job_id, step="Saving artifact…", pct=92)
+        dim_n = content.upper().count("CREATE TABLE DIM_") + content.upper().count("CREATE TABLE \"DIM_")
+        fact_n = content.upper().count("CREATE TABLE FACT_") + content.upper().count("CREATE TABLE \"FACT_")
+        tracability = {
+            "discovery_version": discovery_ctx.get("version"),
+            "oltp_version": oltp_art.get("version"),
+            "bus_matrix_version": (bus_art or {}).get("version"),
+            "model": model,
+            "prompt_key": "datamodel.olap",
+        }
+        art = await _save_artifact(project_id, "olap_ddl", content, model, tracability)
+        await audit_log.insert_one({
+            "action": "datamodel.generate.olap",
+            "project_id": project_id,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "details": {"version": art["version"], "dims": dim_n, "facts": fact_n, "model": model, "job_id": job_id},
+        })
+        _job_finish(
+            job_id,
+            "complete",
+            step="Done",
+            pct=100,
+            result={"artifact_id": art["id"], "version": art["version"], "dims": dim_n, "facts": fact_n},
+        )
+    except HTTPException as he:
+        _job_finish(job_id, "error", error=he.detail)
+    except Exception as e:
+        _job_finish(job_id, "error", error=str(e))
+
+
+async def _run_scripts_job(job_id: str, project_id: str, model: str):
+    """Background generation of all 3 migration scripts (legacy→OLTP, OLTP→OLAP, tests)."""
+    import time as _time
+    try:
+        _job_update(job_id, status="running", step="Loading context…", pct=2)
+        discovery_ctx = await require_stage_context(project_id, "Discovery", "DataModel")
+        proj = await projects.find_one({"id": project_id}, {"_id": 0})
+        oltp_art = await data_models.find_one({"project_id": project_id, "type": "oltp_ddl"}, {"_id": 0})
+        olap_art = await data_models.find_one({"project_id": project_id, "type": "olap_ddl"}, {"_id": 0})
+        if not oltp_art or not olap_art:
+            _job_finish(job_id, "error", error="Generate both OLTP and OLAP DDL first.")
+            return
+
+        tables = await kb_entities.find({"project_id": project_id, "type": "TABLE"}, {"_id": 0}).to_list(500)
+        kb_tables = "\n".join(
+            f"{t.get('name')}({', '.join((c.get('name') for c in (t.get('columns') or [])[:8]))})"
+            for t in tables[:200]
+        )[:8000]
+        oltp_ddl = oltp_art.get("content", "")[:12000]
+        olap_ddl = olap_art.get("content", "")[:12000]
+
+        results = {}
+        scripts = ["migrate_old_to_oltp", "migrate_oltp_to_olap", "test_migration"]
+        for idx, script_type in enumerate(scripts):
+            base_pct = 5 + idx * 31
+            _job_update(job_id, step=f"Generating {script_type}.py…", pct=base_pct)
+            prompt_template = _SCRIPT_PROMPTS[script_type]
+            system_prompt = prompt_template.format(
+                source_tech=proj.get("source_tech", ""),
+                kb_tables=kb_tables,
+                oltp_ddl=oltp_ddl,
+                olap_ddl=olap_ddl,
+            )
+            gen_task = asyncio.create_task(
+                chat_completion(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Write {script_type}.py now."},
+                    ],
+                    model=model,
+                    temperature=0.15,
+                    max_tokens=8000,
+                    timeout=240.0,
+                )
+            )
+            started = _time.time()
+            while not gen_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(gen_task), timeout=3.0)
+                except asyncio.TimeoutError:
+                    elapsed = int(_time.time() - started)
+                    _job_update(
+                        job_id,
+                        step=f"{script_type}.py — LLM generating ({elapsed}s elapsed)…",
+                        pct=min(base_pct + 25, base_pct + int(25 * (1 - 1 / (1 + elapsed / 25)))),
+                    )
+                except Exception:
+                    break
+            try:
+                r = await gen_task
+            except Exception as e:
+                _job_finish(job_id, "error", error=f"{script_type} failed: {e}")
+                return
+            content = await _strip_md_fence(r.get("content", ""))
+            if not content.strip():
+                _job_finish(job_id, "error", error=f"{script_type}: empty content from LLM.")
+                return
+            tracability = {
+                "discovery_version": discovery_ctx.get("version"),
+                "oltp_version": oltp_art.get("version"),
+                "olap_version": olap_art.get("version"),
+                "model": model,
+                "prompt_key": f"_inline.{script_type}",
+            }
+            art = await _save_artifact(project_id, script_type, content, model, tracability)
+            results[script_type] = {"artifact_id": art["id"], "version": art["version"]}
+        _job_finish(job_id, "complete", step="All 3 scripts generated.", pct=100, result=results)
+    except HTTPException as he:
+        _job_finish(job_id, "error", error=he.detail)
+    except Exception as e:
+        _job_finish(job_id, "error", error=str(e))
+
+
+@router.post("/jobs/start/olap")
+async def start_olap_job(payload: dict):
+    """Start OLAP generation as a background job. Returns {job_id} immediately."""
+    project_id = payload.get("project_id")
+    if not project_id:
+        raise HTTPException(400, "project_id required")
+    await require_stage_context(project_id, "Discovery", "DataModel")
+    model = payload.get("model") or "deepseek/deepseek-chat"
+    jid = _new_job(project_id, "olap")
+    asyncio.create_task(_run_olap_job(jid, project_id, model))
+    return {"job_id": jid, "status": "queued"}
+
+
+@router.post("/jobs/start/scripts")
+async def start_scripts_job(payload: dict):
+    """Start migration-scripts generation (3 sequential LLM calls) as a background job."""
+    project_id = payload.get("project_id")
+    if not project_id:
+        raise HTTPException(400, "project_id required")
+    await require_stage_context(project_id, "Discovery", "DataModel")
+    model = payload.get("model") or "deepseek/deepseek-chat"
+    jid = _new_job(project_id, "scripts")
+    asyncio.create_task(_run_scripts_job(jid, project_id, model))
+    return {"job_id": jid, "status": "queued"}
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str):
+    """Poll a job's status. Frontend polls every ~2s. Returns 404 if unknown."""
+    job = _JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found (may have expired or backend restarted)")
+    return {
+        "id": job["id"],
+        "status": job["status"],
+        "step": job.get("step", ""),
+        "pct": job.get("pct", 0),
+        "error": job.get("error"),
+        "result": job.get("result", {}),
+        "kind": job.get("kind"),
+    }
 
 
 # -----------------------------------------------------------
@@ -162,13 +456,8 @@ async def generate_oltp(payload: dict):
                 timeout=300.0,
             )
         )
-        while not gen_task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(gen_task), timeout=8.0)
-            except asyncio.TimeoutError:
-                yield ": ping\n\n"
-            except Exception:
-                break
+        async for ev in _wait_for_llm_with_progress(gen_task, "Generating OLTP DDL", 40, 88):
+            yield ev
 
         try:
             result = await gen_task
@@ -267,13 +556,8 @@ async def generate_olap(payload: dict):
                 timeout=300.0,
             )
         )
-        while not gen_task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(gen_task), timeout=8.0)
-            except asyncio.TimeoutError:
-                yield ": ping\n\n"
-            except Exception:
-                break
+        async for ev in _wait_for_llm_with_progress(gen_task, "Generating OLAP star schema", 40, 88):
+            yield ev
 
         try:
             result = await gen_task
@@ -492,13 +776,8 @@ async def generate_migration_scripts(payload: dict):
                     timeout=240.0,
                 )
             )
-            while not gen_task.done():
-                try:
-                    await asyncio.wait_for(asyncio.shield(gen_task), timeout=8.0)
-                except asyncio.TimeoutError:
-                    yield ": ping\n\n"
-                except Exception:
-                    break
+            async for ev in _wait_for_llm_with_progress(gen_task, f"Writing {script_type}.py", 20, 88):
+                yield ev
             try:
                 result = await gen_task
             except Exception as e:

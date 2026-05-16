@@ -70,6 +70,13 @@ export const listAudit = (projectId) =>
 export const generateOLTPUrl = () => `${API}/data-model/generate/oltp`;
 export const generateOLAPUrl = () => `${API}/data-model/generate/olap`;
 export const generateScriptsUrl = () => `${API}/data-model/generate/migration-scripts`;
+// Job-based (recommended for OLAP + scripts — bypasses ~60s ingress timeout)
+export const startOLAPJob = (projectId, model) =>
+  api.post("/data-model/jobs/start/olap", { project_id: projectId, model }).then((r) => r.data);
+export const startScriptsJob = (projectId, model) =>
+  api.post("/data-model/jobs/start/scripts", { project_id: projectId, model }).then((r) => r.data);
+export const getDataModelJob = (jobId) =>
+  api.get(`/data-model/jobs/${jobId}`).then((r) => r.data);
 export const generateBusMatrix = (projectId, model) =>
   api.post("/data-model/generate/bus-matrix", { project_id: projectId, model }).then((r) => r.data);
 export const generateEntityGraph = (projectId) =>
