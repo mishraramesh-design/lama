@@ -7,11 +7,11 @@ import HelpIcon from "@/components/HelpIcon";
 import { toast } from "sonner";
 
 const STAGES = [
-  { key: "Discovery", label: "1. Discovery & SRS", icon: BookOpen, desc: "Upload legacy files, ask gap questions, freeze SRS." },
-  { key: "DataModel", label: "2. Data Model", icon: Database, desc: "Optimise schema for target stack." },
-  { key: "Architecture", label: "3. Architecture", icon: Boxes, desc: "Decompose into microservices." },
-  { key: "CodeGen", label: "4. Code Generation", icon: Code2, desc: "Generate target code + unit tests." },
-  { key: "Living", label: "5. Living System", icon: Activity, desc: "Selenium tests, SRS diffs, monitoring." },
+  { key: "Discovery", label: "1. Discovery & SRS", icon: BookOpen, desc: "Upload legacy files, ask gap questions, freeze SRS.", path: "/" },
+  { key: "DataModel", label: "2. Data Model", icon: Database, desc: "OLTP + OLAP DDL, Bus Matrix, migration scripts.", path: "/data-model" },
+  { key: "Architecture", label: "3. Architecture", icon: Boxes, desc: "Decompose into microservices.", path: "/" },
+  { key: "CodeGen", label: "4. Code Generation", icon: Code2, desc: "Generate target code + unit tests.", path: "/" },
+  { key: "Living", label: "5. Living System", icon: Activity, desc: "Selenium tests, SRS diffs, monitoring.", path: "/" },
 ];
 
 export default function Sidebar() {
@@ -82,13 +82,19 @@ export default function Sidebar() {
             const status = stageStatus(s.key, idx);
             const isLocked = status === "locked";
             const isFrozen = status === "frozen";
-            const isCurrent = location.pathname === "/" && idx === 0 && !isLocked;
+            const isCurrent = location.pathname === s.path && !isLocked;
             const Icon = s.icon;
             return (
               <button
                 key={s.key}
                 type="button"
-                onClick={() => !isLocked && navigate("/")}
+                onClick={() => {
+                  if (isLocked) {
+                    toast.message("Locked", { description: `Complete and freeze previous stage to unlock ${s.label}.` });
+                    return;
+                  }
+                  navigate(s.path);
+                }}
                 title={s.label}
                 className={`w-9 h-9 flex items-center justify-center rounded-sm border ${
                   isLocked
@@ -177,7 +183,7 @@ export default function Sidebar() {
             const isActive = status === "active";
             const isAvailable = status === "available";
             const isFrozen = status === "frozen";
-            const isCurrent = location.pathname === "/" && idx === 0 && !isLocked;
+            const isCurrent = location.pathname === s.path && !isLocked;
             const Icon = s.icon;
             return (
               <button
@@ -188,7 +194,7 @@ export default function Sidebar() {
                     toast.message("Locked", { description: `Complete and freeze the previous stage to unlock ${s.label}.` });
                     return;
                   }
-                  navigate("/");
+                  navigate(s.path);
                 }}
                 className={`w-full text-left flex items-start gap-2 px-2 py-2 rounded-sm border ${
                   isLocked

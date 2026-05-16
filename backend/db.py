@@ -20,3 +20,9 @@ project_prompts = db.project_prompts
 freeze_gates = db.freeze_gates
 audit_log = db.audit_log
 stage_context = db.stage_context
+
+# Stage 2 — Data Model
+data_models = db.data_models
+bus_matrix = db.bus_matrix
+olap_models = db.olap_models
+migration_artifacts = db.migration_artifacts

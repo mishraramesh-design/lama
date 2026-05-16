@@ -18,6 +18,7 @@ from routes.srs import router as srs_router  # noqa: E402
 from routes.prompts import router as prompts_router  # noqa: E402
 from routes.github import router as github_router  # noqa: E402
 from routes.audit import router as audit_router  # noqa: E402
+from routes.datamodel import router as datamodel_router, factory_router as factory_router  # noqa: E402
 from seed import run_seed  # noqa: E402
 
 
@@ -43,6 +44,8 @@ api_router.include_router(srs_router)
 api_router.include_router(prompts_router)
 api_router.include_router(github_router)
 api_router.include_router(audit_router)
+api_router.include_router(datamodel_router)
+api_router.include_router(factory_router)
 
 app.include_router(api_router)
 

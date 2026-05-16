@@ -56,4 +56,29 @@ export const updateProjectPrompt = (projectId, key, payload) =>
 export const listAudit = (projectId) =>
   api.get(`/audit`, { params: { project_id: projectId } }).then((r) => r.data);
 
+// Data Model — Stage 2
+export const generateOLTPUrl = () => `${API}/data-model/generate/oltp`;
+export const generateOLAPUrl = () => `${API}/data-model/generate/olap`;
+export const generateScriptsUrl = () => `${API}/data-model/generate/migration-scripts`;
+export const generateBusMatrix = (projectId, model) =>
+  api.post("/data-model/generate/bus-matrix", { project_id: projectId, model }).then((r) => r.data);
+export const generateEntityGraph = (projectId) =>
+  api.post("/data-model/generate/entity-graph", { project_id: projectId }).then((r) => r.data);
+export const getDataModelArtifacts = (projectId) =>
+  api.get(`/data-model/${projectId}/artifacts`).then((r) => r.data);
+export const getArtifact = (projectId, artifactId) =>
+  api.get(`/data-model/${projectId}/artifact/${artifactId}`).then((r) => r.data);
+export const updateArtifact = (projectId, artifactId, content) =>
+  api.put(`/data-model/${projectId}/artifact/${artifactId}`, { content }).then((r) => r.data);
+export const freezeArtifact = (projectId, artifactId) =>
+  api.post(`/data-model/${projectId}/artifact/${artifactId}/freeze`).then((r) => r.data);
+export const downloadArtifactUrl = (projectId, artifactId) =>
+  `${API}/data-model/${projectId}/artifact/${artifactId}/download`;
+export const sendDataModelChat = (payload) =>
+  api.post("/data-model/chat", payload).then((r) => r.data);
+export const factoryReset = (projectId) =>
+  api.post(`/projects/${projectId}/factory-reset`).then((r) => r.data);
+export const resetStage2 = (projectId) =>
+  api.post(`/data-model/${projectId}/reset`).then((r) => r.data);
+
 export default api;

@@ -174,3 +174,20 @@ class StageContext(BaseModel):
     sources: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
+
+
+
+# ---------- Data Model (Stage 2) ----------
+class DataModelArtifact(BaseModel):
+    """A generated DDL / migration script / bus matrix artifact for Stage 2."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    project_id: str
+    type: str  # oltp_ddl | olap_ddl | bus_matrix | migrate_old_to_oltp | migrate_oltp_to_olap | test_migration
+    content: str = ""
+    version: int = 1
+    generated_by: str = ""  # model id used
+    tracability: Dict[str, Any] = Field(default_factory=dict)
+    frozen: bool = False
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)

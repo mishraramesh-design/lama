@@ -60,6 +60,148 @@ GLOBAL_PROMPTS = [
         "template": "Optimise the data model from {toon_context} targeting {target_tech}.",
     },
     {
+        "key": "datamodel.oltp",
+        "stage": "DataModel",
+        "description": "Generates normalised 3NF PostgreSQL OLTP DDL from legacy schema + SRS functional requirements.",
+        "force_update": True,
+        "template": """You are a senior PostgreSQL database architect.
+Design a normalised OLTP data model migrating from a legacy system.
+
+PROJECT: {project_name}
+SOURCE: {source_tech} → TARGET: FastAPI / PostgreSQL
+
+LEGACY SCHEMA (from KB):
+{rag_context}
+
+DOMAIN MAP:
+{domain_map}
+
+SRS FUNCTIONAL REQUIREMENTS:
+{srs_functional}
+
+RULES:
+1. Apply 3NF normalisation.
+2. Every table: id UUID DEFAULT gen_random_uuid() PRIMARY KEY.
+3. All timestamps: TIMESTAMPTZ DEFAULT NOW().
+4. Soft deletes: deleted_at TIMESTAMPTZ NULL.
+5. Audit columns on every table: created_at, updated_at, created_by, updated_by.
+6. FK constraints with ON DELETE RESTRICT.
+7. Indexes on: all FKs, status columns, date columns.
+8. ENUM types for status fields.
+9. Comments on every table and complex columns.
+10. Group tables: -- ===== MODULE: User Management =====
+11. Minimum 80% of legacy tables represented.
+12. Be exhaustive — do not truncate output.
+
+OUTPUT: Pure PostgreSQL DDL only.
+Start with: -- LAMA Generated OLTP Schema
+CREATE TYPE statements first, then CREATE TABLE grouped by module,
+then CREATE INDEX at end. No markdown, no explanation.""",
+    },
+    {
+        "key": "datamodel.olap",
+        "stage": "DataModel",
+        "description": "Generates a star-schema OLAP data warehouse DDL optimised for BI and NLP-to-SQL.",
+        "force_update": True,
+        "template": """You are a senior data warehouse architect.
+Design a star schema optimised for BI, visualisation, and NLP-to-SQL.
+
+PROJECT: {project_name}
+OLTP SCHEMA:
+{oltp_ddl}
+
+SRS REQUIREMENTS:
+{srs_functional}
+
+BUS MATRIX:
+{bus_matrix}
+
+RULES:
+1. Star schema: fact_ and dim_ tables only.
+2. Always include dim_date: date_key INT PK, full_date DATE,
+   day_of_week VARCHAR, week_number INT, month_name VARCHAR,
+   quarter INT, year INT, is_weekend BOOL, fiscal_year INT.
+3. Surrogate keys: INT GENERATED ALWAYS AS IDENTITY on dims.
+4. Fact tables: FKs to ALL relevant dimensions.
+5. Measure columns: pre-aggregated amounts, counts, durations.
+6. NLP-to-SQL: human-readable column names, no abbreviations,
+   COMMENT ON COLUMN for every measure with unit.
+7. fact tables: PARTITION BY RANGE (date_key).
+8. Add 5 materialised views for the most common BI queries.
+
+OUTPUT: Pure PostgreSQL DDL only.
+Start with: -- LAMA Generated OLAP Schema (Star Schema)
+Sections: -- DIMENSIONS, -- FACTS, -- MATERIALISED VIEWS""",
+    },
+    {
+        "key": "datamodel.bus_matrix",
+        "stage": "DataModel",
+        "description": "Generates a Kimball Bus Matrix (facts × dimensions) as strict JSON.",
+        "force_update": True,
+        "template": """You are a BI architect. Create a Bus Matrix.
+
+PROJECT: {project_name}
+OLTP SCHEMA:
+{oltp_ddl}
+
+SRS USE CASES:
+{srs_use_cases}
+
+Return STRICT JSON only, no markdown:
+{{
+  "facts": [
+    {{
+      "name": "fact_xxx",
+      "grain": "one row per ...",
+      "source_tables": ["table1"],
+      "measures": [
+        {{"name": "amount", "type": "DECIMAL", "agg": "SUM"}}
+      ]
+    }}
+  ],
+  "dimensions": [
+    {{
+      "name": "dim_xxx",
+      "source_tables": ["table1"],
+      "attributes": [
+        {{"name": "attr_name", "type": "VARCHAR"}}
+      ]
+    }}
+  ],
+  "matrix": {{
+    "fact_xxx": {{"dim_xxx": true, "dim_date": true}}
+  }}
+}}""",
+    },
+    {
+        "key": "datamodel.chat",
+        "stage": "DataModel",
+        "description": "RAG-grounded chat to refine OLTP/OLAP DDL. Wraps proposed DDL in [DDL_CHANGE] tags.",
+        "force_update": True,
+        "template": """You are a PostgreSQL architect helping refine a data model.
+
+PROJECT: {project_name}
+MODEL TYPE: {model_type}
+
+CURRENT DDL:
+{current_ddl}
+
+RELEVANT KB CONTEXT:
+{rag_context}
+
+USER REQUEST: {message}
+
+Instructions:
+- Add/modify table: output ONLY the ALTER TABLE or CREATE TABLE needed.
+- Question: answer concisely.
+- Explanation: explain relevant DDL section only.
+- Never output full schema unless explicitly asked.
+- For any DDL change wrap it:
+  [DDL_CHANGE]
+  -- your SQL here
+  [/DDL_CHANGE]""",
+    },
+    {
         "key": "arch.decompose",
         "stage": "Architecture",
         "description": "Decomposes the legacy monolith into target microservices.",
