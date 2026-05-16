@@ -9,17 +9,15 @@ GLOBAL_PROMPTS = [
     {
         "key": "srs.generate",
         "stage": "Discovery",
-        "description": "Generates a full IEEE 830 SRS document from KB + conversation.",
+        "description": "Generates a full IEEE 830 SRS document (8 sections, one LLM call per section).",
+        "force_update": True,
         "template": (
-            "You are an IEEE 830 SRS analyst. Given this TOON knowledge base:\n{toon_context}\n"
-            "and this conversation history:\n{conversation}\n"
-            "Generate a complete SRS with sections:\n"
-            "1-Purpose 2-Scope 3-Definitions 4-Overall Description 5-Functional Requirements "
-            "6-Non-Functional Requirements 7-Use Cases 8-Constraints.\n"
-            "Be specific. Use actual entity names from the KB. Do not hallucinate features.\n"
-            "Return strict JSON with keys exactly: purpose, scope, definitions, overall_description, "
-            "functional_requirements, non_functional_requirements, use_cases, constraints. "
-            "Each value is markdown text."
+            "[SECTIONED GENERATION] This prompt is now driven by SECTION_CONFIGS in "
+            "routes/srs.py. Each of the 8 SRS sections gets its own LLM call with a "
+            "focused TOON slice (CLASSES / TABLES / ROUTES / INDIVIDUALS) and "
+            "section-specific instructions enforcing min word counts, mandatory "
+            "reference to real class/table/method names, and exhaustive coverage. "
+            "Edit the configs in routes/srs.py SECTION_CONFIGS to change behaviour."
         ),
     },
     {
@@ -78,10 +76,17 @@ GLOBAL_PROMPTS = [
 async def seed_prompts():
     now = datetime.now(timezone.utc).isoformat()
     for p in GLOBAL_PROMPTS:
+        force = p.pop("force_update", False)
         existing = await prompts.find_one({"key": p["key"]}, {"_id": 0})
         if not existing:
             doc = {**p, "version": 1, "updated_at": now}
             await prompts.insert_one(doc)
+        elif force and existing.get("version", 1) <= 2:
+            # Replace stale prompts in place; keep version increment so users see the change.
+            await prompts.update_one(
+                {"key": p["key"]},
+                {"$set": {**p, "version": existing.get("version", 1) + 1, "updated_at": now}},
+            )
 
 
 async def seed_pilot_project():

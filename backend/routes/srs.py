@@ -1,6 +1,7 @@
 """SRS generation, retrieval, freeze, section edit."""
-import json
 import io
+import json
+import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone
@@ -11,16 +12,164 @@ from llm import chat_completion
 
 router = APIRouter(prefix="/srs", tags=["srs"])
 
-DEFAULT_SECTIONS = [
-    "1. Purpose",
-    "2. Scope",
-    "3. Definitions, Acronyms, Abbreviations",
-    "4. Overall Description",
-    "5. Functional Requirements",
-    "6. Non-Functional Requirements",
-    "7. Use Cases",
-    "8. Constraints",
+
+# ----------------------------------------------------------------------------
+# Section configs — one LLM call per section, each with a focused TOON slice.
+# ----------------------------------------------------------------------------
+SECTION_CONFIGS = [
+    {
+        "key": "purpose",
+        "label": "1. Purpose",
+        "toon_focus": "CLASSES",
+        "min_words": 300,
+        "instructions": """Write a comprehensive Purpose section covering:
+- What this system does (based on actual controller/model names found)
+- Who the primary users are (list actual roles from KB)
+- What business problems it solves
+- What the migration aims to achieve
+- List every major module identified (name each controller group)
+- Business context and regulatory requirements visible in the code""",
+    },
+    {
+        "key": "scope",
+        "label": "2. Scope",
+        "toon_focus": "CLASSES",
+        "min_words": 400,
+        "instructions": """Write a detailed Scope section covering:
+- List EVERY functional module found (group controllers by domain)
+- For each module: what it does, which classes implement it
+- What is explicitly OUT of scope for this migration
+- Integration boundaries (external APIs, third-party systems found)
+- Data scope: list major table groups by domain""",
+    },
+    {
+        "key": "definitions",
+        "label": "3. Definitions, Acronyms & Abbreviations",
+        "toon_focus": "INDIVIDUALS",
+        "min_words": 200,
+        "instructions": """Define every domain term, acronym, and abbreviation found in:
+- Table names and column names
+- Class names and method names
+- Role names from the KB
+- Any government/regulatory terms visible
+Format as a definition list with term: explanation.""",
+    },
+    {
+        "key": "overall_description",
+        "label": "4. Overall Description",
+        "toon_focus": "TABLES",
+        "min_words": 500,
+        "instructions": """Write a comprehensive system description covering:
+- System architecture (monolith structure based on controller/model pattern)
+- User classes and roles (list every role with their permissions)
+- Operating environment (PHP version, DB, framework from KB)
+- Design and implementation constraints
+- Assumptions and dependencies
+- Data model overview: list major entity groups with their key tables
+- Session and authentication approach (from session patterns in code)""",
+    },
+    {
+        "key": "functional_requirements",
+        "label": "5. Functional Requirements",
+        "toon_focus": "CLASSES",
+        "min_words": 2000,
+        "instructions": """Write EXHAUSTIVE functional requirements grouped by module.
+For EACH module found in the KB:
+
+### FR-[MODULE]: [Module Name]
+| ID | Requirement | Source Class | DB Tables |
+|----|-------------|--------------|-----------|
+| FR-[N]-001 | [detailed requirement] | [ClassName] | [table1, table2] |
+
+Requirements must cover:
+- Every CRUD operation visible in the controllers
+- Every workflow step (approval flows, status transitions)
+- Every calculation (LD, penalties, claims if present)
+- Every document upload/download operation
+- Every report generation
+- Every notification/alert
+- Every role-based access control rule
+
+Be exhaustive. If you see 50 controllers, write requirements
+for all 50. Do not summarise or group multiple requirements
+into one line.""",
+    },
+    {
+        "key": "non_functional_requirements",
+        "label": "6. Non-Functional Requirements",
+        "toon_focus": "TABLES",
+        "min_words": 400,
+        "instructions": """Write detailed non-functional requirements covering:
+- Performance: response times, concurrent users, bulk operation limits
+- Security: authentication method, session management, role enforcement,
+  encryption (reference actual session patterns from code)
+- Scalability: expected data growth (reference actual table counts)
+- Availability: uptime, backup requirements
+- Data integrity: FK constraints, audit logging requirements
+  (reference actual audit log tables found in KB)
+- Compliance: regulatory requirements visible in the code
+- Migration-specific: data migration approach, zero-downtime requirements,
+  rollback strategy""",
+    },
+    {
+        "key": "use_cases",
+        "label": "7. Use Cases",
+        "toon_focus": "CLASSES",
+        "min_words": 1000,
+        "instructions": """Write detailed use cases for every major workflow found.
+Format each use case as:
+
+### UC-[N]: [Use Case Name]
+- **Actor**: [role name]
+- **Precondition**: [state before]
+- **Main Flow**:
+  1. [step referencing actual method names]
+  2. [step]
+- **Alternative Flows**: [error/rejection paths]
+- **Postcondition**: [state after]
+- **DB Tables Affected**: [list]
+
+Write at minimum one use case per major controller group found.""",
+    },
+    {
+        "key": "constraints",
+        "label": "8. Constraints",
+        "toon_focus": "TABLES",
+        "min_words": 300,
+        "instructions": """Write constraints covering:
+- Technology constraints (source stack that must be migrated FROM)
+- Target technology requirements
+- Database migration constraints (list tables with complex FKs)
+- High-risk entities (tables/classes with most dependencies)
+- External integration constraints (APIs found in code)
+- Data volume constraints (reference actual table counts from KB)
+- Timeline and compliance constraints
+- Migration risk register: top 10 highest-risk entities with reason""",
+    },
 ]
+
+
+def extract_toon_section(toon: str, section_name: str, max_chars: int) -> str:
+    """Extract a named section from the TOON output (e.g. 'CLASSES', 'TABLES')."""
+    if not toon:
+        return ""
+    lines = toon.split("\n")
+    in_section = False
+    result: list[str] = []
+    total = 0
+    for line in lines:
+        if line.startswith(f"# {section_name}"):
+            in_section = True
+            continue
+        if in_section and line.startswith("# "):
+            break
+        if in_section:
+            result.append(line)
+            total += len(line)
+            if total >= max_chars:
+                result.append("...[truncated for context]")
+                break
+    return "\n".join(result)
 
 
 async def _get_prompt(project_id: str, key: str) -> str:
@@ -31,65 +180,97 @@ async def _get_prompt(project_id: str, key: str) -> str:
     return g["template"] if g else ""
 
 
-@router.post("/generate")
-async def generate_srs(payload: dict):
-    project_id = payload.get("project_id")
-    conversation_id = payload.get("conversation_id")
-    model = payload.get("model") or "deepseek/deepseek-chat"
+async def _gen_one_section(cfg: dict, proj: dict, full_toon: str, summary: str, convo_text: str, model: str) -> dict:
+    """Generate one SRS section. Returns {'content': ..., 'tokens': int}."""
+    toon_slice = extract_toon_section(full_toon, cfg["toon_focus"], 15000)
+    # Larger sections need a bigger token budget so they aren't cut off mid-document.
+    if cfg["min_words"] >= 1500:
+        max_tokens = 14000
+    elif cfg["min_words"] >= 800:
+        max_tokens = 10000
+    else:
+        max_tokens = 6000
 
+    system_prompt = f"""You are a senior business analyst writing a DETAILED IEEE 830 Software Requirements Specification for a legacy application migration.
+
+PROJECT: {proj.get('name', '')}
+SOURCE STACK: {proj.get('source_tech', '')}
+TARGET STACK: {proj.get('target_tech', '')}
+KB SUMMARY: {summary}
+CONVERSATION CONTEXT:
+{convo_text}
+
+KNOWLEDGE BASE — {cfg['toon_focus']}:
+{toon_slice}
+
+Write ONLY the "{cfg['label']}" section of the SRS.
+
+{cfg['instructions']}
+
+RULES:
+- Use actual class names, table names, method names from the KB above.
+- Never write generic placeholders like "[Module Name]" — use real names.
+- Minimum {cfg['min_words']} words for this section.
+- Format: markdown with sub-headings, bullet lists, tables where appropriate.
+- Write as if a developer with zero prior knowledge must implement from scratch.
+- Do NOT summarise. Be exhaustive and specific.
+
+Return only the markdown content. No JSON. No preamble."""
+
+    llm_msgs = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Write the {cfg['label']} section now. Be detailed and exhaustive."},
+    ]
+
+    try:
+        result = await chat_completion(
+            messages=llm_msgs,
+            model=model,
+            temperature=0.2,
+            max_tokens=max_tokens,
+            timeout=240.0,
+        )
+        content = (result["content"] or "").strip()
+        # Some models wrap the response in ```markdown … ``` despite the rules.
+        if content.startswith("```"):
+            content = content[3:]
+            if content[:8].lower().startswith("markdown"):
+                content = content[8:]
+            content = content.lstrip("\n")
+            if content.endswith("```"):
+                content = content[:-3].rstrip()
+        return {
+            "content": content,
+            "tokens": result["usage"].get("total_tokens", 0),
+        }
+    except Exception as e:
+        return {"content": f"_[Section generation failed: {e}]_", "tokens": 0}
+
+
+async def _load_srs_context(project_id: str, conversation_id: str | None):
     proj = await projects.find_one({"id": project_id}, {"_id": 0})
     if not proj:
         raise HTTPException(404, "Project not found")
 
+    existing = await srs_documents.find_one({"project_id": project_id}, {"_id": 0})
+    if existing and existing.get("frozen"):
+        raise HTTPException(400, "SRS is frozen — unfreeze before regenerating")
+
     toon_doc = await kb_toon.find_one({"project_id": project_id}, {"_id": 0})
-    toon_context = (toon_doc or {}).get("toon", "")[:10000]
+    full_toon = (toon_doc or {}).get("toon", "")
+    summary = (toon_doc or {}).get("summary", "Knowledge base is empty.")
 
     q = {"project_id": project_id}
     if conversation_id:
         q["conversation_id"] = conversation_id
     history = await messages.find(q, {"_id": 0}).sort("created_at", 1).to_list(200)
-    convo_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)[-8000:]
+    convo_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)[-6000:]
 
-    template = await _get_prompt(project_id, "srs.generate")
-    if not template:
-        template = (
-            "You are an IEEE 830 SRS analyst. Given this TOON knowledge base:\n{toon_context}\n"
-            "and this conversation history:\n{conversation}\n"
-            "Generate a complete SRS with sections:\n"
-            "1-Purpose 2-Scope 3-Definitions 4-Overall Description 5-Functional Requirements "
-            "6-Non-Functional Requirements 7-Use Cases 8-Constraints.\n"
-            "Be specific. Use actual entity names from the KB. Do not hallucinate features.\n"
-            "Return strict JSON with keys exactly: purpose, scope, definitions, overall_description, "
-            "functional_requirements, non_functional_requirements, use_cases, constraints. "
-            "Each value is markdown text."
-        )
+    return proj, existing, full_toon, summary, convo_text
 
-    system_content = template.format(
-        toon_context=toon_context,
-        conversation=convo_text,
-    )
-    system_content += "\n\nReturn ONLY valid JSON, no preamble, no code fences."
 
-    llm_messages = [
-        {"role": "system", "content": system_content},
-        {"role": "user", "content": "Generate the SRS document now."},
-    ]
-
-    try:
-        result = await chat_completion(messages=llm_messages, model=model, temperature=0.2, max_tokens=6000)
-    except Exception as e:
-        raise HTTPException(502, f"LLM call failed: {e}")
-
-    raw = result["content"].strip()
-    # try to extract JSON
-    sections = _parse_srs_json(raw)
-
-    # store
+async def _persist_srs(project_id: str, existing: dict | None, sections: dict, total_tokens: int, model: str) -> int:
     now = datetime.now(timezone.utc).isoformat()
-    existing = await srs_documents.find_one({"project_id": project_id}, {"_id": 0})
-    if existing and existing.get("frozen"):
-        raise HTTPException(400, "SRS is frozen — unfreeze before regenerating")
-
     doc = SRSDocument(
         project_id=project_id,
         sections=sections,
@@ -97,82 +278,141 @@ async def generate_srs(payload: dict):
     )
     doc_dict = doc.model_dump()
     doc_dict["updated_at"] = now
-
     await srs_documents.update_one(
         {"project_id": project_id},
         {"$set": doc_dict},
         upsert=True,
     )
-
     await audit_log.insert_one({
         "action": "srs.generate",
         "project_id": project_id,
         "at": now,
-        "details": {"model": result["model"], "tokens": result["usage"].get("total_tokens", 0)},
+        "details": {
+            "model": model,
+            "sections": len(sections),
+            "version": doc_dict["version"],
+            "tokens": total_tokens,
+        },
     })
+    return doc_dict["version"]
 
+
+@router.post("/generate")
+async def generate_srs(payload: dict):
+    """Synchronous JSON generation — runs all 8 sections then returns."""
+    project_id = payload.get("project_id")
+    if not project_id:
+        raise HTTPException(400, "project_id required")
+    conversation_id = payload.get("conversation_id")
+    model = payload.get("model") or "deepseek/deepseek-chat"
+
+    proj, existing, full_toon, summary, convo_text = await _load_srs_context(project_id, conversation_id)
+
+    sections: dict[str, str] = {}
+    total_tokens = 0
+    for cfg in SECTION_CONFIGS:
+        r = await _gen_one_section(cfg, proj, full_toon, summary, convo_text, model)
+        sections[cfg["key"]] = r["content"]
+        total_tokens += r["tokens"]
+        # incremental save so client can poll GET /srs/{id}
+        await srs_documents.update_one(
+            {"project_id": project_id},
+            {"$set": {
+                "project_id": project_id,
+                f"sections.{cfg['key']}": r["content"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
+
+    version = await _persist_srs(project_id, existing, sections, total_tokens, model)
     return {
         "ok": True,
         "sections": sections,
-        "usage": result["usage"],
-        "version": doc_dict["version"],
+        "version": version,
+        "total_tokens": total_tokens,
     }
 
 
-def _parse_srs_json(raw: str) -> dict:
-    """Robust JSON parse with fallbacks."""
-    text = raw.strip()
-    # strip code fences
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    # try direct
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return _normalise_keys(data)
-    except Exception:
-        pass
-    # find first { ... last }
-    s = text.find("{")
-    e = text.rfind("}")
-    if s >= 0 and e > s:
-        try:
-            data = json.loads(text[s:e + 1])
-            return _normalise_keys(data)
-        except Exception:
-            pass
-    # fallback: put raw under purpose
-    return {
-        "purpose": raw,
-        "scope": "",
-        "definitions": "",
-        "overall_description": "",
-        "functional_requirements": "",
-        "non_functional_requirements": "",
-        "use_cases": "",
-        "constraints": "",
-    }
+@router.post("/generate/stream")
+async def generate_srs_stream(payload: dict):
+    """SSE streaming generation. Emits section_start / section_complete / complete events."""
+    project_id = payload.get("project_id")
+    if not project_id:
+        raise HTTPException(400, "project_id required")
+    conversation_id = payload.get("conversation_id")
+    model = payload.get("model") or "deepseek/deepseek-chat"
 
+    proj, existing, full_toon, summary, convo_text = await _load_srs_context(project_id, conversation_id)
 
-def _normalise_keys(d: dict) -> dict:
-    out = {
-        "purpose": "",
-        "scope": "",
-        "definitions": "",
-        "overall_description": "",
-        "functional_requirements": "",
-        "non_functional_requirements": "",
-        "use_cases": "",
-        "constraints": "",
-    }
-    for k, v in d.items():
-        key = k.lower().replace(" ", "_").replace("-", "_")
-        if key in out:
-            out[key] = v if isinstance(v, str) else json.dumps(v, indent=2)
-    return out
+    async def event_gen():
+        sections: dict[str, str] = {}
+        total_tokens = 0
+        yield f"data: {json.dumps({'type': 'start', 'total': len(SECTION_CONFIGS), 'project': proj.get('name', '')})}\n\n"
+
+        for i, cfg in enumerate(SECTION_CONFIGS, start=1):
+            yield (
+                "data: "
+                + json.dumps({
+                    "type": "section_start",
+                    "section": cfg["key"],
+                    "label": cfg["label"],
+                    "index": i,
+                    "total": len(SECTION_CONFIGS),
+                })
+                + "\n\n"
+            )
+
+            r = await _gen_one_section(cfg, proj, full_toon, summary, convo_text, model)
+            sections[cfg["key"]] = r["content"]
+            total_tokens += r["tokens"]
+
+            await srs_documents.update_one(
+                {"project_id": project_id},
+                {"$set": {
+                    "project_id": project_id,
+                    f"sections.{cfg['key']}": r["content"],
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+                upsert=True,
+            )
+
+            yield (
+                "data: "
+                + json.dumps({
+                    "type": "section_complete",
+                    "section": cfg["key"],
+                    "label": cfg["label"],
+                    "index": i,
+                    "total": len(SECTION_CONFIGS),
+                    "content": r["content"],
+                    "tokens": r["tokens"],
+                })
+                + "\n\n"
+            )
+            # let the loop yield to the event loop so the client gets the chunk promptly
+            await asyncio.sleep(0)
+
+        version = await _persist_srs(project_id, existing, sections, total_tokens, model)
+        yield (
+            "data: "
+            + json.dumps({
+                "type": "complete",
+                "version": version,
+                "total_tokens": total_tokens,
+            })
+            + "\n\n"
+        )
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("/{project_id}")
@@ -270,22 +510,135 @@ async def export_pdf(project_id: str):
 def _render_pdf(project: dict, doc: dict) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+    from reportlab.lib import colors
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle,
+        ListFlowable, ListItem,
+    )
     from reportlab.lib.units import cm
+    import re as _re
 
     buf = io.BytesIO()
-    pdf = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm, topMargin=2 * cm, bottomMargin=2 * cm)
+    pdf = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=2 * cm, rightMargin=2 * cm,
+        topMargin=2 * cm, bottomMargin=2 * cm,
+        title=f"SRS - {project.get('name','')}",
+    )
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("title", parent=styles["Title"], fontSize=20, spaceAfter=20)
-    h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontSize=14, spaceBefore=14, spaceAfter=8)
-    body = ParagraphStyle("body", parent=styles["BodyText"], fontSize=10.5, leading=15)
+    title_style = ParagraphStyle("title", parent=styles["Title"], fontSize=22, spaceAfter=20, textColor=colors.HexColor("#0A2540"))
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontSize=16, spaceBefore=16, spaceAfter=10, textColor=colors.HexColor("#0A2540"))
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontSize=13, spaceBefore=12, spaceAfter=6, textColor=colors.HexColor("#0A2540"))
+    h3 = ParagraphStyle("h3", parent=styles["Heading3"], fontSize=11, spaceBefore=8, spaceAfter=4, textColor=colors.HexColor("#1f2937"))
+    body = ParagraphStyle("body", parent=styles["BodyText"], fontSize=10, leading=14, spaceAfter=4)
 
-    elements = []
+    def _inline(text: str) -> str:
+        """Convert inline markdown to ReportLab mini-HTML."""
+        t = text
+        # escape angle brackets in code-spans first
+        t = _re.sub(r"`([^`]+)`", lambda m: f'<font face="Courier">{m.group(1).replace("<", "&lt;").replace(">", "&gt;")}</font>', t)
+        # bold + italic
+        t = _re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", t)
+        t = _re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", t)
+        return t
+
+    def _render_table(md_lines: list[str]) -> Table | None:
+        """Convert a contiguous markdown table block (pipe-delimited) to a ReportLab Table."""
+        rows: list[list[str]] = []
+        for ln in md_lines:
+            if _re.match(r"^\|[\s\-:|]+\|$", ln.strip()):
+                continue  # separator row
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            rows.append(cells)
+        if not rows:
+            return None
+        # Wrap each cell content in Paragraph for wrapping
+        wrapped = [[Paragraph(_inline(c) or "&nbsp;", body) for c in r] for r in rows]
+        tbl = Table(wrapped, repeatRows=1, hAlign="LEFT")
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0A2540")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        return tbl
+
+    def _md_to_flowables(md: str) -> list:
+        out: list = []
+        if not md:
+            out.append(Paragraph("<i>(empty)</i>", body))
+            return out
+        lines = md.split("\n")
+        i = 0
+        bullet_buf: list[str] = []
+        table_buf: list[str] = []
+
+        def _flush_list():
+            nonlocal bullet_buf
+            if bullet_buf:
+                items = [ListItem(Paragraph(_inline(b), body), leftIndent=6) for b in bullet_buf]
+                out.append(ListFlowable(items, bulletType="bullet", leftIndent=12, bulletFontSize=8))
+                out.append(Spacer(1, 4))
+                bullet_buf = []
+
+        def _flush_table():
+            nonlocal table_buf
+            if table_buf:
+                t = _render_table(table_buf)
+                if t is not None:
+                    out.append(t)
+                    out.append(Spacer(1, 6))
+                table_buf = []
+
+        while i < len(lines):
+            ln = lines[i].rstrip()
+            # tables: contiguous block of lines starting with '|'
+            if ln.lstrip().startswith("|"):
+                _flush_list()
+                table_buf.append(ln)
+                i += 1
+                continue
+            else:
+                _flush_table()
+
+            if ln.startswith("### "):
+                _flush_list()
+                out.append(Paragraph(_inline(ln[4:].strip()), h3))
+            elif ln.startswith("## "):
+                _flush_list()
+                out.append(Paragraph(_inline(ln[3:].strip()), h2))
+            elif ln.startswith("# "):
+                _flush_list()
+                out.append(Paragraph(_inline(ln[2:].strip()), h1))
+            elif _re.match(r"^\s*[-*]\s+", ln):
+                bullet_buf.append(_inline(_re.sub(r"^\s*[-*]\s+", "", ln)))
+            elif _re.match(r"^\s*\d+\.\s+", ln):
+                bullet_buf.append(_inline(_re.sub(r"^\s*\d+\.\s+", "", ln)))
+            elif ln.strip() == "":
+                _flush_list()
+                out.append(Spacer(1, 4))
+            else:
+                _flush_list()
+                out.append(Paragraph(_inline(ln), body))
+            i += 1
+
+        _flush_list()
+        _flush_table()
+        return out
+
+    elements: list = []
     elements.append(Paragraph("Software Requirements Specification", title_style))
     elements.append(Paragraph(f"<b>Project:</b> {project.get('name','')}", body))
     elements.append(Paragraph(f"<b>Source:</b> {project.get('source_tech','')}  →  <b>Target:</b> {project.get('target_tech','')}", body))
-    elements.append(Paragraph(f"<b>Version:</b> {doc.get('version',1)} | <b>Frozen:</b> {doc.get('frozen', False)}", body))
-    elements.append(Spacer(1, 12))
+    elements.append(Paragraph(f"<b>Version:</b> {doc.get('version',1)} &nbsp;|&nbsp; <b>Frozen:</b> {doc.get('frozen', False)}", body))
+    if doc.get("frozen_at"):
+        elements.append(Paragraph(f"<b>Frozen at:</b> {doc.get('frozen_at')} by {doc.get('frozen_by','')}", body))
+    elements.append(Spacer(1, 16))
 
     section_order = [
         ("purpose", "1. Purpose"),
@@ -298,10 +651,11 @@ def _render_pdf(project: dict, doc: dict) -> bytes:
         ("constraints", "8. Constraints"),
     ]
     sections = doc.get("sections", {})
-    for key, label in section_order:
-        elements.append(Paragraph(label, h2))
-        text = (sections.get(key) or "(empty)").replace("\n", "<br/>")
-        elements.append(Paragraph(text, body))
+    for idx, (key, label) in enumerate(section_order):
+        if idx > 0:
+            elements.append(PageBreak())
+        elements.append(Paragraph(label, h1))
+        elements.extend(_md_to_flowables(sections.get(key) or ""))
 
     pdf.build(elements)
     return buf.getvalue()
