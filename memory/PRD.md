@@ -56,14 +56,41 @@ Full-stack legacy application migration assistant. FastAPI backend + React front
 - New page `/settings` (GitHubSettingsPage) with config form, Test Connection, folder-tree preview, Push SRS button.
 - PyGithub + requests added to `requirements.txt`.
 
+**Iteration 3-4 (EY theme, Qdrant RAG, SSE, StageContext):**
+- EY rebrand (yellow/navy).
+- Qdrant vector store + semantic RAG for SRS sections.
+- SSE per-section streaming SRS generation with keepalive pings.
+- Resizable + collapsible 3-panel layout (`react-resizable-panels@2.1.7`).
+- Markdown rendering + inline edit in SRS panel.
+- `StageContext` persistence model + `pipeline.py` loader.
+- `GET /api/projects/{id}/pipeline` for sidebar badges.
+
+**Iteration 5 (this iteration — Sidebar fix + Section 9 ER + OWL export):**
+- 🔧 Fixed corrupted `routes/projects.py` syntax error (line 37 was `e")` instead of `@router.get("/{project_id}/pipeline")`) — backend was failing to boot.
+- 🔧 Added missing `useEffect` + `getPipelineStatus` imports to `Sidebar.jsx`.
+- 🔧 Wired expanded sidebar `STAGES.map` to use new `stageStatus()` helper with **Frozen v{N} / Ready / Soon** badges (data-testid: `stage-{key}-badge-frozen|ready|locked`).
+- ✨ **Section 9 — Entity Relationship Model** added to SRS pipeline:
+  - `_gen_entity_model()` computes ER data deterministically from `kb_entities` (no LLM): nodes (with x/y/domain/columns/pk), edges (FK relationships), domain clusters, stats.
+  - `SECTION_CONFIGS` now has 9 entries; `_gen_one_section()` branches for `entity_model`.
+  - Frontend `ERDiagram.jsx` (D3 force-directed graph): zoom/pan, drag nodes, search, show/hide logs tables, click to see column detail.
+  - PDF export renders Section 9 as text-only summary ("N tables across D domains with R FK relationships").
+- ✨ **OWL/JSON-LD context download** — `GET /api/kb/{id}/owl-export`:
+  - Returns full ontology: `@graph` (classes/tables/routes/roles), `data_model_hints` (high_risk, audit/lookup/junction classification, domains), `microservice_hints` (suggested service boundaries), `migration_context` (stats + SRS purpose summary).
+  - "Download OWL Context" button in KB Health card (`data-testid=owl-export-btn`).
+- 📦 New dependency: `d3@7.9.0` (frontend).
+- ✅ Testing agent: 11/11 checkpoints PASS (6/6 backend, 5/5 frontend). Verified on project `7a0b9827-…` with 525 tables / 208 FKs / 42 domains.
+
 ## Backlog
+**P0** — None (Prompt 2/4 complete).
+**P1 (User-driven, upcoming Prompts 3-4 in series)** — Wait for next prompt from user.
+**P1** — Implement functional backends for pipeline stages 2-5 (DataModel, Architecture, CodeGen, Living). Currently UI placeholders.
+**P1** — Un-stub GitHub code push for CodeGen stage.
 **P1** — Replace `dict` payloads with Pydantic models on `/api/kb/scan-folder`, `/api/kb/build`, `/api/srs/generate|freeze|unfreeze`.
-**P1** — Surface SRS auto-trigger failures in chat response (currently silently `false`).
+**P2** — Fix nested-button HTML in `Sidebar.jsx` (HelpIcon Radix Tooltip trigger inside `<button>` causes React hydration warning).
+**P2** — Surface SRS auto-trigger failures in chat response (currently silently `false`).
 **P2** — Migrate from deprecated `@app.on_event` to FastAPI `lifespan`.
 **P2** — `GET /api/srs/{id}` return 404 (or `exists` flag) when no SRS.
-**P2** — `token_preview` should show last 4 chars (not first 6).
 **P2** — Streaming chat responses.
-**P2** — Batched insert for very large folder scans.
 
 ## Next Phases
 - **Stage 2 — DataModel**: target schema normalisation; push `schema/*.sql` to GitHub.
