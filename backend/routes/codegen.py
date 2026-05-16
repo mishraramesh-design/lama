@@ -285,21 +285,24 @@ async def _run_codegen_job(jid: str, project_id: str, model: str, only_service: 
         if only_service:
             await codegen_files.delete_many({"project_id": project_id, "service_name": only_service})
 
-        files_done = 0
-        last_svc = None
-        services_done = 0
-        for svc, file_def in all_files:
-            files_done += 1
-            if svc["name"] != last_svc:
-                if last_svc is not None and last_svc != "_root":
-                    services_done += 1
-                last_svc = svc["name"]
-            base_pct = 2 + int((files_done / max(1, len(all_files))) * 95)
-            _job_update(jid, step=f"[{files_done}/{len(all_files)}] {file_def['path']}", pct=base_pct)
-            _job_log(jid, file_def["path"])
-            content = await _gen_one_file(project_id, svc, file_def, model, run)
-            await _save_codegen_file(jid, project_id, svc, file_def, content)
-            await codegen_runs.update_one({"id": jid}, {"$set": {"files_done": files_done, "services_done": services_done}})
+        files_total = len(all_files)
+        completed = {"n": 0}
+        sem = asyncio.Semaphore(5)  # parallel LLM calls
+
+        async def gen_and_save(svc, file_def):
+            async with sem:
+                _job_log(jid, file_def["path"])
+                content = await _gen_one_file(project_id, svc, file_def, model, run)
+                await _save_codegen_file(jid, project_id, svc, file_def, content)
+                completed["n"] += 1
+                pct = 2 + int((completed["n"] / max(1, files_total)) * 95)
+                _job_update(jid, step=f"[{completed['n']}/{files_total}] {file_def['path']}", pct=pct)
+                if completed["n"] % 5 == 0 or completed["n"] == files_total:
+                    await codegen_runs.update_one({"id": jid}, {"$set": {"files_done": completed["n"]}})
+
+        _job_update(jid, step=f"Generating {files_total} files in parallel (concurrency=5)…", pct=2)
+        await asyncio.gather(*[gen_and_save(svc, fd) for svc, fd in all_files])
+        files_done = completed["n"]
 
         await codegen_runs.update_one(
             {"id": jid},

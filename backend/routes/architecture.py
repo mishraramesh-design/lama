@@ -387,32 +387,43 @@ async def _run_hld_job(jid: str, project_id: str, model: str):
             _job_finish(jid, "error", error="arch.hld prompt missing.")
             return
 
-        sections_md: List[Dict[str, str]] = []
+        sections_md: List[Dict[str, str]] = [None] * len(HLD_SECTIONS)
         total = len(HLD_SECTIONS)
-        for i, (key, label, instructions, min_words) in enumerate(HLD_SECTIONS):
-            base_pct = 5 + int((i / total) * 88)
-            _job_update(jid, step=f"Section {i+1}/{total}: {label}", pct=base_pct)
-            system_prompt = _safe_format(
-                template,
-                project_name=proj.get("name", ""),
-                recommended_pattern=sm_data.get("recommended_pattern", ""),
-                services_summary=services_summary,
-                srs_functional=srs_functional,
-                oltp_summary=oltp_summary,
-                section_name=label,
-                section_instructions=instructions,
-                min_words=str(min_words),
-            )
-            try:
-                r = await chat_completion(
-                    messages=[{"role": "system", "content": system_prompt},
-                              {"role": "user", "content": f"Write the {label} section now."}],
-                    model=model, temperature=0.2, max_tokens=4000, timeout=180.0,
+        completed = {"n": 0}
+        sem = asyncio.Semaphore(4)  # parallel LLM calls
+
+        async def gen_section(i, key, label, instructions, min_words):
+            async with sem:
+                system_prompt = _safe_format(
+                    template,
+                    project_name=proj.get("name", ""),
+                    recommended_pattern=sm_data.get("recommended_pattern", ""),
+                    services_summary=services_summary,
+                    srs_functional=srs_functional,
+                    oltp_summary=oltp_summary,
+                    section_name=label,
+                    section_instructions=instructions,
+                    min_words=str(min_words),
                 )
-                section_md = (r.get("content", "") or "").strip()
-            except Exception as e:
-                section_md = f"## {label}\n\n_Generation error: {e}_"
-            sections_md.append({"key": key, "label": label, "content": section_md})
+                try:
+                    r = await chat_completion(
+                        messages=[{"role": "system", "content": system_prompt},
+                                  {"role": "user", "content": f"Write the {label} section now."}],
+                        model=model, temperature=0.2, max_tokens=4000, timeout=180.0,
+                    )
+                    section_md = (r.get("content", "") or "").strip()
+                except Exception as e:
+                    section_md = f"## {label}\n\n_Generation error: {e}_"
+                completed["n"] += 1
+                pct = 5 + int((completed["n"] / total) * 90)
+                _job_update(jid, step=f"Section {completed['n']}/{total}: {label}", pct=pct)
+                sections_md[i] = {"key": key, "label": label, "content": section_md}
+
+        _job_update(jid, step=f"Generating {total} sections in parallel…", pct=5)
+        await asyncio.gather(*[
+            gen_section(i, k, lab, instr, mw)
+            for i, (k, lab, instr, mw) in enumerate(HLD_SECTIONS)
+        ])
 
         # Assemble final HLD
         full = "\n\n".join(f"## {s['label']}\n\n{s['content']}" for s in sections_md)
@@ -471,36 +482,44 @@ async def _run_lld_job(jid: str, project_id: str, model: str):
             return
 
         total = len(services)
-        per_service: List[str] = []
-        for i, svc in enumerate(services):
-            base_pct = 5 + int((i / total) * 88)
-            _job_update(jid, step=f"LLD for {svc['name']} ({i+1}/{total})", pct=base_pct)
-            relevant_ddl = "\n".join(
-                line for line in oltp_ddl.split("\n")
-                if any(t in line for t in (svc.get("tables") or []))
-            )[:4000]
-            sp = _safe_format(
-                template,
-                project_name=proj.get("name", ""),
-                service_name=svc.get("name", ""),
-                service_responsibility=svc.get("responsibility", ""),
-                backend_lang=svc.get("backend_lang", "nodejs"),
-                service_tables=", ".join(svc.get("tables", []) or []),
-                service_endpoints="\n".join(svc.get("api_endpoints", []) or []),
-                service_dependencies=", ".join(svc.get("dependencies", []) or []),
-                hld_summary=hld_summary,
-                relevant_ddl=relevant_ddl or "(no DDL excerpt for this service)",
-            )
-            try:
-                r = await chat_completion(
-                    messages=[{"role": "system", "content": sp},
-                              {"role": "user", "content": f"Write the LLD for {svc['name']} now."}],
-                    model=model, temperature=0.2, max_tokens=6000, timeout=200.0,
+        per_service: List[str] = [None] * total
+        completed = {"n": 0}
+        sem = asyncio.Semaphore(4)
+
+        async def gen_lld(i, svc):
+            async with sem:
+                relevant_ddl = "\n".join(
+                    line for line in oltp_ddl.split("\n")
+                    if any(t in line for t in (svc.get("tables") or []))
+                )[:4000]
+                sp = _safe_format(
+                    template,
+                    project_name=proj.get("name", ""),
+                    service_name=svc.get("name", ""),
+                    service_responsibility=svc.get("responsibility", ""),
+                    backend_lang=svc.get("backend_lang", "nodejs"),
+                    service_tables=", ".join(svc.get("tables", []) or []),
+                    service_endpoints="\n".join(svc.get("api_endpoints", []) or []),
+                    service_dependencies=", ".join(svc.get("dependencies", []) or []),
+                    hld_summary=hld_summary,
+                    relevant_ddl=relevant_ddl or "(no DDL excerpt for this service)",
                 )
-                content = (r.get("content", "") or "").strip()
-            except Exception as e:
-                content = f"## {svc['name']}\n\n_Generation error: {e}_"
-            per_service.append(f"# Service: {svc['display_name']} (`{svc['name']}`)\n\n{content}")
+                try:
+                    r = await chat_completion(
+                        messages=[{"role": "system", "content": sp},
+                                  {"role": "user", "content": f"Write the LLD for {svc['name']} now."}],
+                        model=model, temperature=0.2, max_tokens=6000, timeout=200.0,
+                    )
+                    content = (r.get("content", "") or "").strip()
+                except Exception as e:
+                    content = f"## {svc['name']}\n\n_Generation error: {e}_"
+                completed["n"] += 1
+                pct = 5 + int((completed["n"] / total) * 90)
+                _job_update(jid, step=f"LLD {completed['n']}/{total}: {svc['name']}", pct=pct)
+                per_service[i] = f"# Service: {svc['display_name']} (`{svc['name']}`)\n\n{content}"
+
+        _job_update(jid, step=f"Generating LLD for {total} services in parallel…", pct=5)
+        await asyncio.gather(*[gen_lld(i, svc) for i, svc in enumerate(services)])
 
         full = "\n\n---\n\n".join(per_service)
         tracability = {"service_count": total, "model": model, "prompt_key": "arch.lld"}
@@ -559,30 +578,38 @@ async def _run_seq_job(jid: str, project_id: str, model: str):
             _job_finish(jid, "error", error="arch.sequence prompt missing.")
             return
 
-        diagrams: List[Dict[str, str]] = []
+        diagrams: List[Dict[str, str]] = [None] * len(cases)
         total = len(cases)
-        for i, uc in enumerate(cases):
-            base_pct = 5 + int((i / total) * 88)
-            label = uc.split("\n")[0][:80].lstrip("# ").strip() or f"Workflow {i+1}"
-            _job_update(jid, step=f"Diagram for: {label}", pct=base_pct)
-            sp = _safe_format(
-                template,
-                project_name=proj.get("name", ""),
-                use_case_name=label,
-                use_case_content=uc[:1500],
-                services_list=services_list,
-                relevant_endpoints=endpoints[:2000],
-            )
-            try:
-                r = await chat_completion(
-                    messages=[{"role": "system", "content": sp},
-                              {"role": "user", "content": "Generate the mermaid sequenceDiagram now."}],
-                    model=model, temperature=0.2, max_tokens=2500, timeout=120.0,
+        completed = {"n": 0}
+        sem = asyncio.Semaphore(4)
+
+        async def gen_seq(i, uc):
+            async with sem:
+                label = uc.split("\n")[0][:80].lstrip("# ").strip() or f"Workflow {i+1}"
+                sp = _safe_format(
+                    template,
+                    project_name=proj.get("name", ""),
+                    use_case_name=label,
+                    use_case_content=uc[:1500],
+                    services_list=services_list,
+                    relevant_endpoints=endpoints[:2000],
                 )
-                content = (r.get("content", "") or "").strip()
-            except Exception as e:
-                content = f"```mermaid\nsequenceDiagram\n  Note over System: error: {e}\n```"
-            diagrams.append({"use_case": label, "mermaid": content})
+                try:
+                    r = await chat_completion(
+                        messages=[{"role": "system", "content": sp},
+                                  {"role": "user", "content": "Generate the mermaid sequenceDiagram now."}],
+                        model=model, temperature=0.2, max_tokens=2500, timeout=120.0,
+                    )
+                    content = (r.get("content", "") or "").strip()
+                except Exception as e:
+                    content = f"```mermaid\nsequenceDiagram\n  Note over System: error: {e}\n```"
+                completed["n"] += 1
+                pct = 5 + int((completed["n"] / total) * 90)
+                _job_update(jid, step=f"Diagram {completed['n']}/{total}: {label}", pct=pct)
+                diagrams[i] = {"use_case": label, "mermaid": content}
+
+        _job_update(jid, step=f"Generating {total} diagrams in parallel…", pct=5)
+        await asyncio.gather(*[gen_seq(i, uc) for i, uc in enumerate(cases)])
 
         body = "\n\n".join(f"## {d['use_case']}\n\n{d['mermaid']}" for d in diagrams)
         tracability = {"use_case_count": total, "model": model, "prompt_key": "arch.sequence"}
