@@ -151,21 +151,34 @@ async def search(project_id: str, query: str, top_k: int = 8) -> list[str]:
             None,
             lambda: embedder.encode([query], normalize_embeddings=True)[0].tolist(),
         )
-        results = await loop.run_in_executor(
-            None,
-            lambda: client.search(
+        query_filter = models.Filter(
+            must=[models.FieldCondition(
+                key="project_id",
+                match=models.MatchValue(value=project_id),
+            )]
+        )
+
+        def _do_search():
+            # qdrant-client >= 1.10 uses query_points; older uses search.
+            if hasattr(client, "query_points"):
+                res = client.query_points(
+                    collection_name=COLLECTION,
+                    query=vector,
+                    query_filter=query_filter,
+                    limit=top_k,
+                    with_payload=True,
+                )
+                # query_points returns a wrapper with .points
+                return getattr(res, "points", res)
+            return client.search(
                 collection_name=COLLECTION,
                 query_vector=vector,
-                query_filter=models.Filter(
-                    must=[models.FieldCondition(
-                        key="project_id",
-                        match=models.MatchValue(value=project_id),
-                    )]
-                ),
+                query_filter=query_filter,
                 limit=top_k,
                 with_payload=True,
-            ),
-        )
+            )
+
+        results = await loop.run_in_executor(None, _do_search)
         return [r.payload.get("content", "") for r in results if r.payload]
     except Exception as e:
         logger.warning(f"Qdrant search failed, returning empty: {e}")

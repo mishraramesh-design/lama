@@ -122,7 +122,10 @@ async def send_message(req: ChatRequest):
     if req.edit_mode and req.selected_section:
         prompt_key = "srs.edit"
         srs_doc = await srs_documents.find_one({"project_id": req.project_id}, {"_id": 0})
-        current_section_content = (srs_doc or {}).get("sections", {}).get(req.selected_section, "") or ""
+        raw_section = (srs_doc or {}).get("sections", {}).get(req.selected_section, "") or ""
+        # Truncate to keep the prompt within LLM context window, and neutralise
+        # stray `{` / `}` characters in user markdown so `str.format()` doesn't fail.
+        current_section_content = raw_section[:8000].replace("{", "{{").replace("}", "}}")
     else:
         intent = detect_intent(req.message) if stage == "discovery" else None
         prompt_key = intent if stage == "discovery" else f"{stage}.system"
@@ -186,7 +189,9 @@ async def send_message(req: ChatRequest):
     llm_messages.append({"role": "user", "content": req.message})
 
     try:
-        result = await chat_completion(messages=llm_messages, model=req.model)
+        # Edit-mode prompts are larger and slower — give them headroom.
+        llm_timeout = 240.0 if req.edit_mode else 90.0
+        result = await chat_completion(messages=llm_messages, model=req.model, timeout=llm_timeout)
     except Exception as e:
         raise HTTPException(502, f"LLM call failed: {e}")
 

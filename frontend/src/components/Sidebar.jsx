@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Lock, CheckCircle2, Circle, Library, BookOpen, Database, Boxes, Code2, Activity, Settings as SettingsIcon } from "lucide-react";
+import { Lock, CheckCircle2, Circle, Library, BookOpen, Database, Boxes, Code2, Activity, Settings as SettingsIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { useProjects } from "@/state/ProjectContext";
 import HelpIcon from "@/components/HelpIcon";
 import { toast } from "sonner";
@@ -17,6 +17,75 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { active } = useProjects();
+  const [collapsed, setCollapsed] = useState(
+    typeof window !== "undefined" && localStorage.getItem("lama:panel:sidebar") === "true"
+  );
+
+  const toggle = () => {
+    const v = !collapsed;
+    localStorage.setItem("lama:panel:sidebar", String(v));
+    setCollapsed(v);
+  };
+
+  // ----- Collapsed (rail) mode -----
+  if (collapsed) {
+    return (
+      <aside
+        data-testid="sidebar-collapsed"
+        className="w-12 shrink-0 h-screen flex flex-col bg-white border-r border-[#E6E6E6]"
+      >
+        <button
+          type="button"
+          onClick={toggle}
+          data-testid="expand-sidebar"
+          className="w-9 h-9 m-1.5 bg-[#FFE600] text-[#2E2E38] flex items-center justify-center rounded-sm font-display font-bold text-base"
+          aria-label="Expand sidebar"
+        >
+          L
+        </button>
+        <div className="flex flex-col items-center gap-1 mt-3">
+          {STAGES.map((s, idx) => {
+            const status = active?.stage_status?.[s.key] || "locked";
+            const isLocked = status === "locked";
+            const isFrozen = status === "frozen";
+            const isCurrent = location.pathname === "/" && idx === 0 && !isLocked;
+            const Icon = s.icon;
+            return (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => !isLocked && navigate("/")}
+                title={s.label}
+                className={`w-9 h-9 flex items-center justify-center rounded-sm border ${
+                  isLocked
+                    ? "border-[#E6E6E6] bg-[#F6F6FA] text-[#747480] cursor-not-allowed"
+                    : isCurrent
+                    ? "border-[#2E2E38] bg-[#2E2E38] text-white"
+                    : "border-[#E6E6E6] hover:bg-[#F6F6FA] text-[#2E2E38]"
+                }`}
+              >
+                {isFrozen ? <CheckCircle2 className="w-4 h-4" /> : isLocked ? <Lock className="w-3.5 h-3.5" /> : <Icon className="w-4 h-4" />}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-auto flex flex-col items-center gap-1 pb-2 border-t border-[#E6E6E6] pt-2">
+          <button type="button" onClick={() => navigate("/prompts")} title="Prompt Library" className="w-9 h-9 flex items-center justify-center rounded-sm hover:bg-[#F6F6FA]">
+            <Library className="w-4 h-4 text-[#747480]" />
+          </button>
+          <button type="button" onClick={() => navigate("/settings")} title="Settings & GitHub" className="w-9 h-9 flex items-center justify-center rounded-sm hover:bg-[#F6F6FA]">
+            <SettingsIcon className="w-4 h-4 text-[#747480]" />
+          </button>
+          <button type="button" onClick={() => navigate("/audit")} title="Audit Log" className="w-9 h-9 flex items-center justify-center rounded-sm hover:bg-[#F6F6FA]">
+            <Activity className="w-4 h-4 text-[#747480]" />
+          </button>
+          <button type="button" onClick={toggle} title="Expand sidebar" className="w-9 h-9 flex items-center justify-center rounded-sm hover:bg-[#F6F6FA] mt-1" data-testid="expand-sidebar-bottom">
+            <ChevronRight className="w-4 h-4 text-[#2E2E38]" />
+          </button>
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside
@@ -25,14 +94,25 @@ export default function Sidebar() {
     >
       {/* Brand + Project (static, single-tenant) */}
       <div className="px-5 py-5 border-b border-[#E6E6E6]">
-        <div className="flex items-center gap-2 mb-4">
-          <div className="w-9 h-9 bg-[#FFE600] text-[#2E2E38] flex items-center justify-center rounded-sm font-display font-bold text-base">
-            L
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 bg-[#FFE600] text-[#2E2E38] flex items-center justify-center rounded-sm font-display font-bold text-base">
+              L
+            </div>
+            <div>
+              <div className="font-display font-bold text-xl leading-none tracking-tight text-[#2E2E38]" data-testid="brand-name">LAMA</div>
+              <div className="text-[10px] uppercase tracking-widest text-[#747480] mt-1 leading-tight">Legacy Application<br/>Modernization &amp; Alignment</div>
+            </div>
           </div>
-          <div>
-            <div className="font-display font-bold text-xl leading-none tracking-tight text-[#2E2E38]" data-testid="brand-name">LAMA</div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-500 mt-1 leading-tight">Legacy Application<br/>Modernization &amp; Alignment</div>
-          </div>
+          <button
+            type="button"
+            onClick={toggle}
+            data-testid="collapse-sidebar"
+            className="text-[#747480] hover:text-[#2E2E38] p-1 -mr-1"
+            aria-label="Collapse sidebar"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
         </div>
         {active && (
           <div data-testid="active-project-header">

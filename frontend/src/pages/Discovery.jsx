@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useProjects } from "@/state/ProjectContext";
 import UploadPanel from "@/components/UploadPanel";
