@@ -52,11 +52,11 @@ async def scan_folder(payload: dict):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for f in files:
             full = os.path.join(root, f)
-            ext = os.path.splitext(f)[1].lower()
-            if ext not in ALLOWED_EXTS:
-                continue
             if _should_skip_file(f):
                 skipped.append(f)
+                continue
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in ALLOWED_EXTS:
                 continue
             try:
                 with open(full, "rb") as fh:
