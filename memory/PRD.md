@@ -80,6 +80,12 @@ Full-stack legacy application migration assistant. FastAPI backend + React front
 - 📦 New dependency: `d3@7.9.0` (frontend).
 - ✅ Testing agent: 11/11 checkpoints PASS (6/6 backend, 5/5 frontend). Verified on project `7a0b9827-…` with 525 tables / 208 FKs / 42 domains.
 
+**Iteration 6 (Prompt 3/4 verification + Qdrant prod config):**
+- 🔧 `GithubTestRequest.repo_url` is now optional (default `""`) — token-only POST returns 200 instead of 422.
+- 🟢 All 5 changes in user Prompt 3 (EY colours, resizable panels, SRS markdown, Chat SRS Edit Mode, Qdrant production config) were already implemented in iterations 3-5 — verified by audit grep + smoke tests.
+- 🔑 Set `QDRANT_API_KEY` env var in `backend/.env`. Qdrant client now authenticates against `http://93.127.194.188:6333`; collection auto-creates on next Build KB.
+- ✅ End-to-end smoke-test of Chat SRS Edit Mode: real LLM call returned 10 well-formed FR requirements grounded in actual KB entities (`AdminController.exportClaims`, `pmis_claims` table) — 4121 tokens, sub-60s.
+
 ## Backlog
 **P0** — None (Prompt 2/4 complete).
 **P1 (User-driven, upcoming Prompts 3-4 in series)** — Wait for next prompt from user.
