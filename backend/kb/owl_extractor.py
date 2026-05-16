@@ -167,11 +167,37 @@ def extract_sql(content: str, filename: str = "") -> List[Dict[str, Any]]:
     return entities
 
 
+def extract_zip(content: str, filename: str = "") -> List[Dict[str, Any]]:
+    """ZIP content is concatenated as `===== FILE: path =====` blocks.
+    Split it and route each block to the right extractor based on the inner filename's extension."""
+    entities: List[Dict[str, Any]] = []
+    # split on the marker; each piece is "path =====\n<body>"
+    parts = content.split("===== FILE:")
+    for part in parts:
+        if not part.strip():
+            continue
+        # part starts with " <path> =====\n<body>"
+        try:
+            header, body = part.split("=====", 1)
+        except ValueError:
+            continue
+        inner_name = header.strip()
+        lname = inner_name.lower()
+        src = f"{filename}::{inner_name}" if filename else inner_name
+        if lname.endswith(".php"):
+            entities.extend(extract_php(body, src))
+        elif lname.endswith(".sql"):
+            entities.extend(extract_sql(body, src))
+    return entities
+
+
 def extract(filetype: str, content: str, filename: str = "") -> List[Dict[str, Any]]:
     if filetype == "php":
         return extract_php(content, filename)
     if filetype == "sql":
         return extract_sql(content, filename)
+    if filetype == "zip":
+        return extract_zip(content, filename)
     return []
 
 

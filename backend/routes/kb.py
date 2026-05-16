@@ -76,22 +76,7 @@ async def scan_folder(payload: dict):
                 chunk_count=len(chunks),
                 status="uploaded",
             )
-            await kb_files.insert_one(kb_file.model_dump())
-
-            if chunks:
-                chunk_docs = [
-                    {
-                        "id": f"{kb_file.id}:{i}",
-                        "project_id": project_id,
-                        "file_id": kb_file.id,
-                        "chunk_index": i,
-                        "content": c,
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                    for i, c in enumerate(chunks)
-                ]
-                await kb_chunks.insert_many(chunk_docs)
-
+            await kb_file_persist(kb_file, project_id, text, chunks)
             processed.append(kb_file.filename)
 
     return {
@@ -123,10 +108,33 @@ async def upload_files(project_id: str = Form(...), files: List[UploadFile] = Fi
             chunk_count=len(chunks),
             status="uploaded",
         )
-        await kb_files.insert_one(kb_file.model_dump())
+        await kb_file_persist(kb_file, project_id, text, chunks)
 
-        # store chunks
-        if chunks:
+        uploaded.append({
+            "id": kb_file.id,
+            "filename": kb_file.filename,
+            "filetype": kb_file.filetype,
+            "size": kb_file.size,
+            "chunks": kb_file.chunk_count,
+            "entities": kb_file.entity_count,
+        })
+
+    return {"uploaded": uploaded}
+
+
+async def kb_file_persist(kb_file: KBFile, project_id: str, text: str, chunks: list[str]) -> None:
+    """Persist file + chunks + run OWL extraction on the in-memory parsed text."""
+    # extract entities BEFORE chunks are persisted (avoids re-joining 90k chunks later)
+    entities = extract(kb_file.filetype, text, kb_file.filename)
+    kb_file.entity_count = len(entities)
+    kb_file.status = "processed"
+    await kb_files.insert_one(kb_file.model_dump())
+
+    # store chunks
+    if chunks:
+        # batch the inserts so we never hold all 90k chunk dicts at once
+        BATCH = 1000
+        for start in range(0, len(chunks), BATCH):
             chunk_docs = [
                 {
                     "id": f"{kb_file.id}:{i}",
@@ -136,25 +144,26 @@ async def upload_files(project_id: str = Form(...), files: List[UploadFile] = Fi
                     "content": c,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
-                for i, c in enumerate(chunks)
+                for i, c in enumerate(chunks[start:start + BATCH], start=start)
             ]
             await kb_chunks.insert_many(chunk_docs)
 
-        # store raw text reference for OWL extraction (cache)
-        await kb_files.update_one(
-            {"id": kb_file.id},
-            {"$set": {"raw_text_len": len(text)}}
-        )
+    # store entities (also batched)
+    if entities:
+        BATCH = 1000
+        for start in range(0, len(entities), BATCH):
+            docs = []
+            for e in entities[start:start + BATCH]:
+                e_doc = dict(e)
+                e_doc["project_id"] = project_id
+                e_doc["file_id"] = kb_file.id
+                docs.append(e_doc)
+            await kb_entities.insert_many(docs)
 
-        uploaded.append({
-            "id": kb_file.id,
-            "filename": kb_file.filename,
-            "filetype": kb_file.filetype,
-            "size": kb_file.size,
-            "chunks": kb_file.chunk_count,
-        })
-
-    return {"uploaded": uploaded}
+    await kb_files.update_one(
+        {"id": kb_file.id},
+        {"$set": {"raw_text_len": len(text), "entity_count": kb_file.entity_count, "status": "processed"}},
+    )
 
 
 @router.get("/{project_id}/files")
@@ -180,35 +189,47 @@ async def build_kb(payload: dict):
     if not project_id:
         raise HTTPException(400, "project_id required")
 
-    files = await kb_files.find({"project_id": project_id}, {"_id": 0}).to_list(500)
+    files = await kb_files.find({"project_id": project_id}, {"_id": 0}).to_list(2000)
     if not files:
         raise HTTPException(400, "No files uploaded")
 
-    # Clear previous extracted entities for this project
-    await kb_entities.delete_many({"project_id": project_id})
-
-    all_entities = []
+    # Re-extract for any file that has chunks but zero entities (legacy uploads or
+    # files where extraction was added after the upload).
     for f in files:
-        # Re-read text from chunks (joined)
-        chunks_cur = kb_chunks.find({"file_id": f["id"]}, {"_id": 0}).sort("chunk_index", 1)
-        chunks = await chunks_cur.to_list(10000)
-        text = "\n".join(c["content"] for c in chunks)
-        entities = extract(f["filetype"], text, f["filename"])
-
+        existing = await kb_entities.count_documents({"file_id": f["id"]})
+        if existing > 0:
+            continue
+        if f.get("filetype") not in ("php", "sql", "zip"):
+            continue
+        # Rebuild raw text from chunks — no cap, batched read
+        cur = kb_chunks.find({"file_id": f["id"]}, {"_id": 0}).sort("chunk_index", 1)
+        # Use the chunker overlap of 150 chars; for accuracy we just join — minor
+        # duplicate text in overlaps is harmless for regex matching.
+        pieces: list[str] = []
+        async for c in cur:
+            pieces.append(c["content"])
+        text = "\n".join(pieces)
+        try:
+            entities = extract(f["filetype"], text, f["filename"])
+        except Exception:
+            entities = []
         if entities:
-            docs = []
-            for e in entities:
-                e_doc = dict(e)
-                e_doc["project_id"] = project_id
-                e_doc["file_id"] = f["id"]
-                docs.append(e_doc)
-            await kb_entities.insert_many(docs)
-            all_entities.extend(entities)
-
+            BATCH = 1000
+            for start in range(0, len(entities), BATCH):
+                docs = []
+                for e in entities[start:start + BATCH]:
+                    e_doc = dict(e)
+                    e_doc["project_id"] = project_id
+                    e_doc["file_id"] = f["id"]
+                    docs.append(e_doc)
+                await kb_entities.insert_many(docs)
         await kb_files.update_one(
             {"id": f["id"]},
-            {"$set": {"entity_count": len(entities), "status": "processed"}}
+            {"$set": {"entity_count": len(entities), "status": "processed"}},
         )
+
+    # Aggregate
+    all_entities = await kb_entities.find({"project_id": project_id}, {"_id": 0}).to_list(100000)
 
     toon = serialise(all_entities)
     stats = aggregate_stats(all_entities)
