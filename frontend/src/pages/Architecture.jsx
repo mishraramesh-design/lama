@@ -43,7 +43,18 @@ import {
 import { Button } from "@/components/ui/button";
 import MiniConsole from "@/components/MiniConsole";
 
-mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose", flowchart: { htmlLabels: true } });
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "neutral",
+  securityLevel: "loose",
+  suppressErrorRendering: true,
+  flowchart: { htmlLabels: true },
+});
+
+const _mmId = (() => {
+  let n = 0;
+  return () => `mm-${++n}-${Math.random().toString(36).slice(2, 8)}`;
+})();
 
 const ARTIFACT_META = {
   service_map: { label: "Service Map", icon: Network, ext: "json" },
@@ -63,9 +74,20 @@ function MermaidBlock({ chart, id }) {
     if (!ref.current || !chart) return;
     let cancelled = false;
     const render = async () => {
+      const cleaned = (chart || "").trim();
+      // Validate first to prevent mermaid from injecting an error SVG into <body>
       try {
-        const cleaned = chart.trim();
-        const { svg } = await mermaid.render(id, cleaned);
+        const ok = await mermaid.parse(cleaned, { suppressErrors: true });
+        if (ok === false) {
+          if (!cancelled) setErr("Invalid Mermaid syntax — check the diagram below.");
+          return;
+        }
+      } catch (e) {
+        if (!cancelled) setErr(String(e?.message || e));
+        return;
+      }
+      try {
+        const { svg } = await mermaid.render(_mmId(), cleaned);
         if (!cancelled && ref.current) ref.current.innerHTML = svg;
       } catch (e) {
         if (!cancelled) setErr(String(e?.message || e));
@@ -76,7 +98,14 @@ function MermaidBlock({ chart, id }) {
   }, [chart, id]);
   if (err) {
     return (
-      <pre className="text-[11px] bg-rose-50 border border-rose-200 text-rose-700 p-2 rounded-sm overflow-x-auto">{err}\n\n{chart}</pre>
+      <div className="bg-amber-50 border border-amber-200 rounded-sm p-2 my-1" data-testid="mermaid-error">
+        <div className="text-[10px] uppercase font-bold text-amber-700">Mermaid render error</div>
+        <pre className="text-[11px] text-amber-800 mt-1 whitespace-pre-wrap">{err}</pre>
+        <details className="mt-1">
+          <summary className="text-[10px] text-[#747480] cursor-pointer">Show source</summary>
+          <pre className="text-[10px] mt-1 bg-white border border-[#E6E6E6] p-2 rounded-sm overflow-x-auto whitespace-pre-wrap">{chart}</pre>
+        </details>
+      </div>
     );
   }
   return <div ref={ref} data-testid={`mermaid-${id}`} className="bg-white border border-[#E6E6E6] rounded-sm p-3 overflow-x-auto" />;
@@ -87,11 +116,17 @@ function MarkdownWithMermaid({ source, idPrefix }) {
   const parts = useMemo(() => {
     if (!source) return [];
     const out = [];
-    const re = /```mermaid\n([\s\S]*?)```/g;
+    // Support ```mermaid, ~~~mermaid, and ```mmd fenced blocks
+    const re = /(?:```|~~~)[ \t]*(?:mermaid|mmd)\b[^\n]*\n([\s\S]*?)(?:```|~~~)/gi;
     let last = 0; let m; let i = 0;
     while ((m = re.exec(source)) !== null) {
       if (m.index > last) out.push({ type: "md", content: source.slice(last, m.index) });
-      out.push({ type: "mermaid", content: m[1], key: `${idPrefix}-mm-${i++}` });
+      let chart = m[1] || "";
+      // Strip any stray inner fences the LLM may have nested
+      chart = chart.replace(/^[ \t]*(?:```|~~~)[a-zA-Z]*\s*\n?/, "")
+                   .replace(/\n?(?:```|~~~)\s*$/, "")
+                   .trim();
+      out.push({ type: "mermaid", content: chart, key: `${idPrefix}-mm-${i++}` });
       last = m.index + m[0].length;
     }
     if (last < source.length) out.push({ type: "md", content: source.slice(last) });
@@ -231,6 +266,13 @@ export default function ArchitecturePage() {
   const navigate = useNavigate();
   const { active } = useProjects();
   const projectId = active?.id;
+
+  // Clean up any stray mermaid error SVGs that may have been injected into document.body
+  // by previous failed renders (mermaid <11 quirk). Runs once on mount.
+  useEffect(() => {
+    document.querySelectorAll('body > svg[id^="dmermaid"], body > svg[aria-roledescription="error"]')
+      .forEach((el) => el.remove());
+  }, []);
 
   const [artifacts, setArtifacts] = useState([]);
   const [services, setServices] = useState([]);
