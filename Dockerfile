@@ -18,9 +18,18 @@ ENV NODE_ENV=production \
     GENERATE_SOURCEMAP=false \
     REACT_APP_BACKEND_URL=""
 
-# Cache yarn install layer
-COPY frontend/package.json frontend/yarn.lock ./
-RUN corepack enable && yarn install --frozen-lockfile --network-timeout 600000
+# Cache yarn install layer.
+# Note: yarn.lock is optional — the wildcard makes the COPY succeed even
+# if the lockfile isn't tracked in git. Commit yarn.lock for reproducible
+# CI builds.
+COPY frontend/package.json frontend/yarn.lock* ./
+RUN corepack enable && \
+    if [ -f yarn.lock ]; then \
+        yarn install --frozen-lockfile --network-timeout 600000; \
+    else \
+        echo "[lama] yarn.lock not found — falling back to fresh resolve"; \
+        yarn install --network-timeout 600000; \
+    fi
 
 # Build
 COPY frontend/ ./
