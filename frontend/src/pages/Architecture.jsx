@@ -386,6 +386,7 @@ export default function ArchitecturePage() {
             <button onClick={() => navigate("/data-model")} className="mt-4 text-xs px-3 py-1.5 bg-[#2E2E38] text-white rounded-sm">Open DataModel →</button>
           </div>
         </div>
+        <MiniConsole stage="Architecture" projectId={projectId} />
       </div>
     );
   }

@@ -244,6 +244,20 @@ async def fabric_chat(
             else:
                 new_messages.append(msg)
         messages = new_messages
+    elif status == "replaced" and agent and agent.get("replaced_template"):
+        # Replace first system message with replaced_template; keep user messages intact
+        repl = agent["replaced_template"]
+        replaced = False
+        new_messages = []
+        for msg in messages:
+            if not replaced and msg.get("role") == "system":
+                new_messages.append({"role": "system", "content": repl})
+                replaced = True
+            else:
+                new_messages.append(msg)
+        if not replaced:
+            new_messages.insert(0, {"role": "system", "content": repl})
+        messages = new_messages
 
     # Token budget
     budget = (agent or {}).get("token_budget_total", 0)

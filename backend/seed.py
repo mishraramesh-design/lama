@@ -626,6 +626,9 @@ async def seed_agents():
         {"key": "srs.edit", "agent_type": "task", "stage": "Discovery",
          "label": "SRS Editor", "description": "Edits one SRS section per user instruction.",
          "complexity": "medium", "max_tokens": 6000},
+        {"key": "srs.diff", "agent_type": "task", "stage": "Discovery",
+         "label": "SRS Diff Analyser", "description": "Diff frozen SRS vs running system.",
+         "complexity": "medium", "max_tokens": 4000},
         # DataModel
         {"key": "datamodel.oltp", "agent_type": "task", "stage": "DataModel",
          "label": "OLTP DDL Generator", "description": "Generates normalised PostgreSQL OLTP schema.",

@@ -330,6 +330,7 @@ export default function CodeGenPage() {
             <button onClick={() => navigate("/architecture")} className="mt-4 text-xs px-3 py-1.5 bg-[#2E2E38] text-white rounded-sm">Open Architecture →</button>
           </div>
         </div>
+        <MiniConsole stage="CodeGen" projectId={projectId} />
       </div>
     );
   }

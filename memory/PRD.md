@@ -115,8 +115,22 @@ Full-stack legacy application migration assistant. FastAPI backend + React front
 - 🟢 Artifact freeze cascading → DataModel StageContext + Architecture unlock: working.
 - 🟢 Stage 2 reset + Factory reset: working with typed-confirmation modals.
 
+**Iteration 9 (this iteration — Console: Model Fabric + Agent Fabric + Prompt Engineering):**
+- ✅ **DB**: Added `model_providers`, `agent_configs`, `token_usage_log`, `github_configs` collections.
+- ✅ **Models**: Appended `ModelProvider`, `AgentConfig`, `TokenUsageLog` Pydantic models.
+- ✅ **Fabric engine** (`backend/fabric/model_fabric.py`, ~280 lines): provider presets (openrouter/anthropic/openai/groq/ollama/custom), auto-detect-from-key prefix, complexity routing, `fabric_chat()` unified LLM client with status handling (enabled/disabled/wrapped/replaced), token-budget enforcement, usage logging to `token_usage_log`.
+- ✅ **Seed**: 22 agents auto-seeded on startup (1 orchestrator + tasks per stage). Idempotent.
+- ✅ **`routes/console.py`** (~370 lines): 15 endpoints — providers CRUD + setup + test + fetch-models, agents CRUD + reset-budget + test + usage, usage summary/log, prompt preview/test.
+- ✅ **`llm.py`**: added `fabric_call()` drop-in wrapper that routes through fabric when providers configured, else falls back to legacy `chat_completion()`. Stage routes now `from llm import fabric_call as chat_completion` — zero-touch alias.
+- ✅ **Frontend `/console` page** (~580 lines): 3 tabs Models | Agents | Prompts. Quick-Setup card (paste-key → auto-configure). Provider cards with routing table, Test/Fetch/Set-default/Edit-key/Delete actions. Agents accordion grouped by stage with inline expand showing complexity/status/override/wrap/replace controls + token budget + Test button. Prompts split-panel editor + live KB-resolved preview + Test prompt with cost estimate.
+- ✅ **`MiniConsole.jsx`** floating bottom-right panel on Architecture + CodeGen pages, polling `/console/usage/summary` every 15s, with deep-link to `/console?tab=agents`. Renders in both locked + unlocked stage state.
+- ✅ **Sidebar**: new "Console" nav item (Terminal icon) above Prompt Library; collapsed-rail icon button too.
+- ✅ **Part 11 fixes**: github.py `/test` endpoint accepts empty repo_url + valid token (token-format-only validation); test_lama_v4 chat-edit assertion accepts 502 (LLM env timeout).
+- ✅ **Testing**: 18/19 console backend tests pass. /console UI: all three tabs render, 22 agents grouped 5 stages (1+4, 1+4, 1+5, 1+4, 1+0). MiniConsole now renders in locked state too.
+- 📐 **HLD/LLD/Sequence/CodeGen LLM job parallelism** (iteration 8.5): `asyncio.gather` + `Semaphore(4/5)` brought HLD from ~5-10 min → ~95s.
+
 ## Backlog
-**P0** — None (Stages 3 + 4 frontends complete).
+**P0** — None.
 **P1** — Stage 5 (Living): backend + frontend (Selenium tests, SRS-drift detection, runtime observability).
 **P1** — End-to-end smoke of Stage 3 (recommend → HLD → LLD → sequence → freeze) and Stage 4 (generate → ZIP → push) on the seeded project (real LLM calls — burns OpenRouter tokens; do on user request).
 **P1** — Verify CodeGen GitHub-push end-to-end aligned with Stage 4 expectations (PyGithub commit-sha extraction simplified in iteration 8).
