@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Emergent platform artifacts (excluded from images)
+.emergent
+emergent.yml
+
+# Node
+**/node_modules
+**/.cache
+**/build
+**/dist
+**/.next
+**/.yarn
+**/coverage
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.venv
+**/venv
+
+# Environment & secrets (must be passed at runtime)
+**/.env
+**/.env.local
+**/.env.*.local
+
+# IDE
+.idea
+.vscode
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests & reports (excluded from production image to keep it small)
+test_reports
+test_result.md
+
+# Docs we don't need inside container
+README.md
+*.md
