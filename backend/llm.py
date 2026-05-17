@@ -64,3 +64,53 @@ async def chat_completion(
 def estimate_tokens(text: str) -> int:
     """Rough token estimate (4 chars per token)."""
     return max(1, len(text) // 4)
+
+
+async def fabric_call(
+    messages: List[Dict],
+    agent_key: str = "",
+    project_id: str = "",
+    **kwargs,
+) -> Dict:
+    """Drop-in replacement for chat_completion. Routes through Model Fabric if providers
+    are configured, else falls back to legacy chat_completion. Accepts both
+    `model=...` (legacy) and `model_override=...` kwargs.
+    """
+    # Infer agent_key from call stack if not provided
+    if not agent_key:
+        try:
+            import inspect
+            frame = inspect.currentframe().f_back
+            mod = frame.f_globals.get("__name__", "")
+            agent_key = {
+                "routes.architecture": "arch.chat",
+                "routes.codegen": "codegen.chat",
+                "routes.datamodel": "datamodel.chat",
+                "routes.srs": "srs.generate",
+                "routes.chat": "srs.gap_question",
+            }.get(mod, "unknown")
+        except Exception:
+            agent_key = "unknown"
+    try:
+        from db import model_providers as mp_col
+        has_providers = await mp_col.count_documents({"is_active": True}) > 0
+        if has_providers:
+            from fabric.model_fabric import fabric_chat
+            return await fabric_chat(
+                messages=messages,
+                agent_key=agent_key,
+                project_id=project_id,
+                model_override=kwargs.get("model_override", "") or kwargs.get("model", ""),
+                max_tokens=kwargs.get("max_tokens", 0) or 0,
+                temperature=kwargs.get("temperature", 0.3),
+                timeout=kwargs.get("timeout", 120.0),
+            )
+    except Exception:
+        pass
+    model = kwargs.get("model_override") or kwargs.get("model", "deepseek/deepseek-chat")
+    return await chat_completion(
+        messages=messages, model=model,
+        max_tokens=kwargs.get("max_tokens", 4096) or 4096,
+        temperature=kwargs.get("temperature", 0.3),
+        timeout=kwargs.get("timeout", 120.0),
+    )

@@ -595,6 +595,93 @@ async def seed_pilot_project():
     return pilot
 
 
+async def seed_agents():
+    """Seed default agent configurations. Idempotent."""
+    from db import agent_configs as ac_col
+    from models import AgentConfig as _AgentConfig
+    AGENTS = [
+        # Orchestrators
+        {"key": "orchestrator.discovery", "agent_type": "orchestrator", "stage": "Discovery",
+         "label": "Discovery Orchestrator", "description": "Manages KB build → OWL → TOON → SRS pipeline.",
+         "complexity": "medium", "max_tokens": 2048},
+        {"key": "orchestrator.datamodel", "agent_type": "orchestrator", "stage": "DataModel",
+         "label": "Data Model Orchestrator", "description": "Manages OLTP → OLAP → Bus Matrix → Scripts.",
+         "complexity": "medium", "max_tokens": 2048},
+        {"key": "orchestrator.architecture", "agent_type": "orchestrator", "stage": "Architecture",
+         "label": "Architecture Orchestrator", "description": "Manages Recommend → HLD → LLD → Sequence.",
+         "complexity": "medium", "max_tokens": 2048},
+        {"key": "orchestrator.codegen", "agent_type": "orchestrator", "stage": "CodeGen",
+         "label": "CodeGen Orchestrator", "description": "Manages per-service file generation pipeline.",
+         "complexity": "medium", "max_tokens": 2048},
+        {"key": "orchestrator.living", "agent_type": "orchestrator", "stage": "Living",
+         "label": "Living SRS Orchestrator", "description": "Manages diff SRS → test generation pipeline.",
+         "complexity": "medium", "max_tokens": 2048},
+        # Discovery
+        {"key": "srs.gap_question", "agent_type": "task", "stage": "Discovery",
+         "label": "SRS Gap Questioner", "description": "Asks one clarifying question per turn from KB.",
+         "complexity": "low", "max_tokens": 512},
+        {"key": "srs.generate", "agent_type": "task", "stage": "Discovery",
+         "label": "SRS Generator", "description": "Generates one IEEE 830 SRS section per call.",
+         "complexity": "high", "max_tokens": 8000},
+        {"key": "srs.edit", "agent_type": "task", "stage": "Discovery",
+         "label": "SRS Editor", "description": "Edits one SRS section per user instruction.",
+         "complexity": "medium", "max_tokens": 6000},
+        # DataModel
+        {"key": "datamodel.oltp", "agent_type": "task", "stage": "DataModel",
+         "label": "OLTP DDL Generator", "description": "Generates normalised PostgreSQL OLTP schema.",
+         "complexity": "high", "max_tokens": 16000},
+        {"key": "datamodel.olap", "agent_type": "task", "stage": "DataModel",
+         "label": "OLAP Schema Generator", "description": "Generates star schema for BI/NLP-to-SQL.",
+         "complexity": "medium", "max_tokens": 14000},
+        {"key": "datamodel.bus_matrix", "agent_type": "task", "stage": "DataModel",
+         "label": "Bus Matrix Generator", "description": "Generates fact × dimension bus matrix JSON.",
+         "complexity": "low", "max_tokens": 4000},
+        {"key": "datamodel.chat", "agent_type": "task", "stage": "DataModel",
+         "label": "Data Model Chat", "description": "RAG chat for editing OLTP/OLAP models.",
+         "complexity": "medium", "max_tokens": 6000},
+        # Architecture
+        {"key": "arch.recommend", "agent_type": "task", "stage": "Architecture",
+         "label": "Architecture Recommender", "description": "Recommends pattern and service decomposition.",
+         "complexity": "high", "max_tokens": 8000},
+        {"key": "arch.hld", "agent_type": "task", "stage": "Architecture",
+         "label": "HLD Generator", "description": "Generates one HLD section per call.",
+         "complexity": "high", "max_tokens": 4000},
+        {"key": "arch.lld", "agent_type": "task", "stage": "Architecture",
+         "label": "LLD Generator", "description": "Generates complete LLD for one service.",
+         "complexity": "medium", "max_tokens": 6000},
+        {"key": "arch.sequence", "agent_type": "task", "stage": "Architecture",
+         "label": "Sequence Diagram Generator", "description": "Generates Mermaid sequence diagrams per use case.",
+         "complexity": "low", "max_tokens": 2500},
+        {"key": "arch.chat", "agent_type": "task", "stage": "Architecture",
+         "label": "Architecture Chat", "description": "RAG chat for editing architecture documents.",
+         "complexity": "medium", "max_tokens": 4000},
+        # CodeGen
+        {"key": "codegen.service", "agent_type": "task", "stage": "CodeGen",
+         "label": "Service Code Generator", "description": "Generates one production code file per call.",
+         "complexity": "high", "max_tokens": 4500},
+        {"key": "codegen.frontend", "agent_type": "task", "stage": "CodeGen",
+         "label": "Frontend Code Generator", "description": "Generates React components and pages.",
+         "complexity": "medium", "max_tokens": 4500},
+        {"key": "codegen.docs", "agent_type": "task", "stage": "CodeGen",
+         "label": "Documentation Generator", "description": "Generates service README and API docs.",
+         "complexity": "low", "max_tokens": 4000},
+        {"key": "codegen.chat", "agent_type": "task", "stage": "CodeGen",
+         "label": "CodeGen Chat", "description": "RAG chat for editing generated code files.",
+         "complexity": "medium", "max_tokens": 6000},
+    ]
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    for a in AGENTS:
+        existing = await ac_col.find_one({"key": a["key"]}, {"_id": 0})
+        if not existing:
+            doc = _AgentConfig(**a)
+            d = doc.model_dump()
+            d["created_at"] = now
+            d["updated_at"] = now
+            await ac_col.insert_one(d)
+
+
 async def run_seed():
     await seed_prompts()
     await seed_pilot_project()
+    await seed_agents()

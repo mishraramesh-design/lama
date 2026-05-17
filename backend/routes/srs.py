@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from db import srs_documents, kb_toon, messages, projects, audit_log, prompts, project_prompts, kb_entities, stage_context as stage_context_col
 from models import SRSDocument, SRSSectionUpdate, StageContext
-from llm import chat_completion
+from llm import fabric_call as chat_completion
 from kb.vector_store import search as qdrant_search
 from kb.owl_export import export_owl
 from kb.toon import serialise as toon_serialise

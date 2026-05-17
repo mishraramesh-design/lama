@@ -16,7 +16,7 @@ from db import (
     messages as messages_col, conversations, stage_context as stage_context_col,
     data_models,
 )
-from llm import chat_completion
+from llm import fabric_call as chat_completion
 from kb.vector_store import search as qdrant_search
 from pipeline import require_stage_context, save_stage_context
 from codegen.zip_builder import build_zip

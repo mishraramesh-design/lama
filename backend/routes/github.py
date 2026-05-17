@@ -72,6 +72,12 @@ async def get_config(project_id: str):
 @router.post("/test")
 async def test_connection(payload: GithubTestRequest):
     """Fetch repo metadata to verify token + URL."""
+    if not payload.repo_url:
+        # Token-only validation: format-only check
+        t = payload.token or ""
+        if not (t.startswith("ghp_") or t.startswith("github_pat_") or len(t) > 20):
+            return {"ok": False, "error": "Invalid token format"}
+        return {"ok": True, "message": "Token format valid. Provide repo_url to test connection."}
     try:
         owner, repo = _parse_repo(payload.repo_url)
     except HTTPException as e:

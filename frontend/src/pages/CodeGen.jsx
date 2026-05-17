@@ -38,6 +38,7 @@ import {
   resetCodegen,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import MiniConsole from "@/components/MiniConsole";
 
 // language detection by extension
 const EXT_LANG = {
@@ -548,6 +549,7 @@ export default function CodeGenPage() {
         title="Reset Stage 4 — CodeGen"
         warning="Removes all generated files and codegen runs. Stage 5 (Living) context will also be cleared."
       />
+      <MiniConsole stage="CodeGen" projectId={projectId} />
     </div>
   );
 }

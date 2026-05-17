@@ -41,6 +41,7 @@ import {
   resetArch,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import MiniConsole from "@/components/MiniConsole";
 
 mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose", flowchart: { htmlLabels: true } });
 
@@ -579,6 +580,7 @@ export default function ArchitecturePage() {
         title="Reset Stage 3 — Architecture"
         warning="Removes all architecture artifacts (service map, HLD, LLD, sequence, contracts) and unlocks Architecture for re-generation. Stage 4 / Stage 5 contexts will also be cleared."
       />
+      <MiniConsole stage="Architecture" projectId={projectId} />
     </div>
   );
 }

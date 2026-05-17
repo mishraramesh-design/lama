@@ -31,7 +31,7 @@ from db import (
     kb_toon,
 )
 from models import DataModelArtifact, ChatMessage
-from llm import chat_completion
+from llm import fabric_call as chat_completion
 from kb.vector_store import search as qdrant_search, delete_project_vectors
 from pipeline import require_stage_context, save_stage_context
 

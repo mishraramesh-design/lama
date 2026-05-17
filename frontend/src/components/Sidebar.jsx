@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Lock, CheckCircle2, Circle, Library, BookOpen, Database, Boxes, Code2, Activity, Settings as SettingsIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Lock, CheckCircle2, Circle, Library, BookOpen, Database, Boxes, Code2, Activity, Settings as SettingsIcon, ChevronLeft, ChevronRight, Terminal } from "lucide-react";
 import { useProjects } from "@/state/ProjectContext";
 import { getPipelineStatus } from "@/lib/api";
 import HelpIcon from "@/components/HelpIcon";
@@ -112,6 +112,9 @@ export default function Sidebar() {
           })}
         </div>
         <div className="mt-auto flex flex-col items-center gap-1 pb-2 border-t border-[#E6E6E6] pt-2">
+          <button type="button" onClick={() => navigate("/console")} title="Console" className="w-9 h-9 flex items-center justify-center rounded-sm hover:bg-[#F6F6FA]">
+            <Terminal className="w-4 h-4 text-[#747480]" />
+          </button>
           <button type="button" onClick={() => navigate("/prompts")} title="Prompt Library" className="w-9 h-9 flex items-center justify-center rounded-sm hover:bg-[#F6F6FA]">
             <Library className="w-4 h-4 text-[#747480]" />
           </button>
@@ -239,6 +242,17 @@ export default function Sidebar() {
 
       {/* Bottom nav */}
       <div className="px-4 py-3 border-t border-[#E6E6E6] space-y-1">
+        <button
+          data-testid="nav-console"
+          onClick={() => navigate("/console")}
+          className={`w-full flex items-center gap-2 px-2 py-2 rounded-sm text-[13px] ${
+            location.pathname === "/console" ? "bg-[#F6F6FA] text-[#2E2E38] font-semibold" : "text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <Terminal className="w-4 h-4" />
+          Console
+          <HelpIcon text="Model Fabric, Agent Fabric, and Prompt Engineering — configure providers, override per-agent models, test prompts, and watch token usage." testId="help-console" />
+        </button>
         <button
           data-testid="nav-prompts"
           onClick={() => navigate("/prompts")}

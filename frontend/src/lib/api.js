@@ -154,4 +154,50 @@ export const freezeCodegen = (projectId) =>
 export const resetCodegen = (projectId) =>
   api.post(`/codegen/${projectId}/reset`).then((r) => r.data);
 
+// Console — Model Fabric
+export const setupProvider = (data) =>
+  api.post("/console/providers/setup", data).then((r) => r.data);
+export const listProviders = () =>
+  api.get("/console/providers").then((r) => r.data);
+export const updateProvider = (id, data) =>
+  api.put(`/console/providers/${id}`, data).then((r) => r.data);
+export const updateProviderKey = (id, apiKey) =>
+  api.put(`/console/providers/${id}/key`, { api_key: apiKey }).then((r) => r.data);
+export const deleteProvider = (id) =>
+  api.delete(`/console/providers/${id}`).then((r) => r.data);
+export const testProvider = (id) =>
+  api.post(`/console/providers/${id}/test`).then((r) => r.data);
+export const fetchProviderModels = (id) =>
+  api.post(`/console/providers/${id}/fetch-models`).then((r) => r.data);
+export const listAvailableModels = () =>
+  api.get("/console/models/available").then((r) => r.data);
+
+// Console — Agent Fabric
+export const listAgents = () =>
+  api.get("/console/agents").then((r) => r.data);
+export const getAgent = (key) =>
+  api.get(`/console/agents/${encodeURIComponent(key)}`).then((r) => r.data);
+export const updateAgent = (key, data) =>
+  api.put(`/console/agents/${encodeURIComponent(key)}`, data).then((r) => r.data);
+export const resetAgentBudget = (key) =>
+  api.post(`/console/agents/${encodeURIComponent(key)}/reset-budget`).then((r) => r.data);
+export const testAgent = (key, projectId) =>
+  api.post(`/console/agents/${encodeURIComponent(key)}/test`, { project_id: projectId }).then((r) => r.data);
+export const getAgentUsage = (key) =>
+  api.get(`/console/agents/${encodeURIComponent(key)}/usage`).then((r) => r.data);
+
+// Console — Usage
+export const getUsageSummary = (projectId, days = 7) =>
+  api.get(`/console/usage/summary`, { params: { project_id: projectId || "", days } }).then((r) => r.data);
+export const getUsageLog = (params) =>
+  api.get("/console/usage/log", { params }).then((r) => r.data);
+
+// Console — Prompt engineering
+export const previewPrompt = (promptKey, projectId) =>
+  api.post("/console/prompts/preview", { prompt_key: promptKey, project_id: projectId }).then((r) => r.data);
+export const testPrompt = (promptKey, projectId, modelOverride) =>
+  api.post("/console/prompts/test", {
+    prompt_key: promptKey, project_id: projectId, model_override: modelOverride || "",
+  }).then((r) => r.data);
+
 export default api;

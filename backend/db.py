@@ -34,3 +34,11 @@ arch_services = db.arch_services
 # Stage 4 — Code Generation
 codegen_files = db.codegen_files
 codegen_runs = db.codegen_runs
+
+# Console — Model Fabric / Agent Fabric / Usage Logs
+model_providers = db.model_providers
+agent_configs = db.agent_configs
+token_usage_log = db.token_usage_log
+
+# GitHub configs (also referenced in routes/codegen.py)
+github_configs = db.github_configs

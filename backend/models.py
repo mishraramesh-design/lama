@@ -268,3 +268,72 @@ class CodegenRun(BaseModel):
     github_commit: str = ""
     started_at: str = Field(default_factory=_now_iso)
     completed_at: Optional[str] = None
+
+
+# ---------- Console: Model Fabric / Agent Fabric / Token Usage ----------
+class ModelProvider(BaseModel):
+    """One configured LLM provider (OpenRouter, Anthropic, OpenAI, Groq, Ollama, custom)."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    name: str
+    provider_type: str  # "openrouter"|"anthropic"|"openai"|"groq"|"ollama"|"custom"
+    base_url: str
+    api_key: str
+    is_default: bool = False
+    is_active: bool = True
+    detected_from_key: str = ""
+    models: List[Dict[str, Any]] = Field(default_factory=list)
+    routing: Dict[str, str] = Field(default_factory=lambda: {"low": "", "medium": "", "high": ""})
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
+
+
+class AgentConfig(BaseModel):
+    """Configuration for one task agent or stage orchestrator."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    key: str
+    agent_type: str  # "orchestrator"|"task"
+    stage: str  # "Discovery"|"DataModel"|"Architecture"|"CodeGen"|"Living"
+    label: str
+    description: str = ""
+    complexity: str = "medium"  # "low"|"medium"|"high"
+    model_override: str = ""
+    provider_id: str = ""
+    max_tokens: int = 4096
+    temperature: float = 0.3
+    status: str = "enabled"  # "enabled"|"disabled"|"replaced"|"wrapped"
+    wrap_prefix: str = ""
+    wrap_suffix: str = ""
+    replaced_template: str = ""
+    chain_to: str = ""
+    chain_condition: str = "always"
+    token_budget_total: int = 0
+    tokens_used_last_run: int = 0
+    tokens_used_all_time: int = 0
+    last_run_at: str = ""
+    last_run_model: str = ""
+    last_run_input_tokens: int = 0
+    last_run_output_tokens: int = 0
+    last_run_cost_usd: float = 0.0
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
+
+
+class TokenUsageLog(BaseModel):
+    """One LLM call record for reporting."""
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=_new_id)
+    project_id: str = ""
+    agent_key: str
+    stage: str = ""
+    model: str = ""
+    provider_type: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    duration_ms: int = 0
+    status: str = "success"
+    error: str = ""
+    created_at: str = Field(default_factory=_now_iso)

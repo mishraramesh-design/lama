@@ -5,7 +5,7 @@ import uuid
 
 from db import conversations, messages, kb_toon, prompts, project_prompts, projects, srs_documents
 from models import ChatRequest, ChatMessage
-from llm import chat_completion, estimate_tokens, AVAILABLE_MODELS
+from llm import fabric_call as chat_completion, estimate_tokens, AVAILABLE_MODELS
 from kb.vector_store import search as qdrant_search
 
 router = APIRouter(prefix="/chat", tags=["chat"])
