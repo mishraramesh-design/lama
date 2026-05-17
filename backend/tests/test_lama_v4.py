@@ -18,7 +18,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://srs-pilot.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8382").rstrip("/")
 SEEDED_PROJECT_WITH_SRS = "b288ce4a-ffb8-4b92-b15f-7b5e39fa9d3b"
 PMIS_PROJECT_NAME = "PMIS Migration Pilot"
 

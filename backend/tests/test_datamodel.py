@@ -15,7 +15,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://srs-pilot.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8382").rstrip("/")
 TEST_PROJECT_ID = "7a0b9827-a3d1-46c6-82df-533fdd0bc8d8"
 
 
