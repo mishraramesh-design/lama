@@ -13,9 +13,12 @@
 # ===============================================================
 FROM node:20-bookworm-slim AS frontend-build
 WORKDIR /build
-ENV NODE_ENV=production \
-    DISABLE_ESLINT_PLUGIN=true \
+# Do NOT set NODE_ENV=production here — it would make yarn install skip
+# devDependencies (craco, eslint, etc.) and yarn build would then fail with
+# "craco: not found". craco/CRA set NODE_ENV=production internally at build time.
+ENV DISABLE_ESLINT_PLUGIN=true \
     GENERATE_SOURCEMAP=false \
+    CI=false \
     REACT_APP_BACKEND_URL=""
 
 # Cache yarn install layer.
@@ -31,7 +34,7 @@ RUN corepack enable && \
         yarn install --network-timeout 600000; \
     fi
 
-# Build
+# Build (craco internally sets NODE_ENV=production)
 COPY frontend/ ./
 RUN yarn build
 
@@ -71,7 +74,14 @@ RUN set -eux; \
 # ---------- Python backend ----------
 WORKDIR /app/backend
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && \
+
+# Install CPU-only PyTorch first (saves ~700 MB vs the default CUDA build,
+# and drops the triton GPU dep entirely). When pip later processes
+# requirements.txt, the existing torch==2.12.0 install satisfies the pin and
+# the CUDA wheel is NOT re-pulled.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.12.0 && \
+    pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir 'uvicorn[standard]'
 
 COPY backend/ /app/backend/
