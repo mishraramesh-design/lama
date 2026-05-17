@@ -1,0 +1,53 @@
+# docker-compose.yml
+# LAMA — Legacy Application Modernization & Alignment
+#
+# Hostinger Docker Manager usage:
+#   1. Create an .env file in the same directory (copy from .env.example).
+#   2. Click "Deploy" / "docker compose up -d" in Hostinger Docker Manager.
+#
+# Local usage:
+#   docker compose pull
+#   docker compose up -d
+#   docker compose logs -f lama
+#
+# Persisted state: MongoDB data lives in the `lama_mongo_data` named volume
+# (survives image upgrades). External services (Qdrant) are reached via env-vars.
+
+services:
+  lama:
+    image: mishramesh/lama:latest
+    container_name: lama
+    restart: unless-stopped
+    pull_policy: always           # always check Docker Hub for newer image on `up`
+    ports:
+      - "8382:8382"
+    volumes:
+      - lama_mongo_data:/data/db
+    environment:
+      # ---- LLM provider (required for the pipeline) ----
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      LAMA_DEFAULT_MODEL:  ${LAMA_DEFAULT_MODEL:-deepseek/deepseek-chat}
+
+      # ---- Qdrant vector DB (required for KB-RAG chat) ----
+      QDRANT_URL:     ${QDRANT_URL:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+
+      # ---- Database (defaults are fine — Mongo runs inside the container) ----
+      DB_NAME:   ${DB_NAME:-lama}
+      MONGO_URL: ${MONGO_URL:-mongodb://127.0.0.1:27017}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8382/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  lama_mongo_data:
+    name: lama_mongo_data

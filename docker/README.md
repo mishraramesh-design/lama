@@ -24,7 +24,34 @@ The build is fully self-contained — no Emergent footprint, no external scripts
 
 ---
 
-## 2. Pull & run on a Hostinger VPS
+## 2. Deploy on Hostinger (Docker Manager — compose) — recommended
+
+In **Hostinger VPS → Docker Manager → Stacks**, create a new stack and paste the contents of `/docker-compose.yml`. Add the env-vars from `.env.example` (Hostinger lets you paste a `.env` block or fill key-value pairs). Click **Deploy**.
+
+It will:
+- Pull `mishramesh/lama:latest` from Docker Hub
+- Expose `:8382` on the VPS
+- Persist MongoDB to the named volume `lama_mongo_data`
+- Restart automatically on reboot
+- Run a `/health` check every 30s
+
+Upgrade to a new release later by clicking **Pull & redeploy** in Docker Manager (the `pull_policy: always` line in compose makes this one-click).
+
+### Or, plain `docker compose` on any Linux box
+
+```bash
+cd /opt/lama
+curl -fsSL https://raw.githubusercontent.com/mishramesh/lama/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/mishramesh/lama/main/.env.example  -o .env
+$EDITOR .env       # fill in OPENROUTER_API_KEY + QDRANT_URL + QDRANT_API_KEY
+docker compose pull
+docker compose up -d
+docker compose logs -f lama
+```
+
+---
+
+## 3. Deploy on Hostinger (plain `docker run`) — alternative
 
 ```bash
 ssh root@<vps-ip>
