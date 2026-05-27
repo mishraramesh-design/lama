@@ -9,6 +9,16 @@ def parse_php(content: bytes) -> str:
     return content.decode("utf-8", errors="ignore")
 
 
+def parse_java(content: bytes) -> str:
+    """Java / JSP / XML / properties — return raw text (UTF-8 best-effort)."""
+    return content.decode("utf-8", errors="ignore")
+
+
+def parse_code(content: bytes) -> str:
+    """Generic source-code parser (JS/TS/HTML/CSS/Python/C#/VB/etc.)."""
+    return content.decode("utf-8", errors="ignore")
+
+
 def parse_sql(content: bytes) -> str:
     return content.decode("utf-8", errors="ignore")
 
@@ -87,6 +97,24 @@ def parse_file(filename: str, content: bytes, allow_zip_recurse: bool = True) ->
         return "php", parse_php(content)
     if name.endswith(".sql"):
         return "sql", parse_sql(content)
+    if name.endswith(".java"):
+        return "java", parse_java(content)
+    if name.endswith((".jsp", ".jspx", ".jspf", ".tag", ".tld", ".xhtml")):
+        return "jsp", parse_java(content)
+    if name.endswith((".xml", ".properties")):
+        return "config", parse_java(content)
+    if name.endswith((".cs", ".vb", ".aspx", ".cshtml", ".vbhtml", ".config")):
+        return "dotnet", parse_code(content)
+    if name.endswith((".js", ".jsx", ".ts", ".tsx")):
+        return "js", parse_code(content)
+    if name.endswith((".html", ".htm", ".css", ".scss")):
+        return "web", parse_code(content)
+    if name.endswith(".py"):
+        return "python", parse_code(content)
+    if name.endswith((".yaml", ".yml")):
+        return "yaml", parse_code(content)
+    if name.endswith(".json"):
+        return "json", parse_code(content)
     if name.endswith(".pdf"):
         return "pdf", parse_pdf(content)
     if name.endswith(".docx"):

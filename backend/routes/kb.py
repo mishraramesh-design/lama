@@ -19,7 +19,22 @@ logger = logging.getLogger("lama.kb")
 
 router = APIRouter(prefix="/kb", tags=["kb"])
 
-ALLOWED_EXTS = {".php", ".sql", ".pdf", ".csv", ".docx", ".txt", ".md", ".zip"}
+ALLOWED_EXTS = {
+    # Core legacy
+    ".php", ".sql",
+    # Java stack (added)
+    ".java", ".jsp", ".jspx", ".jspf", ".tag", ".tld", ".xml", ".properties", ".xhtml",
+    # .NET / VB stack
+    ".cs", ".vb", ".aspx", ".cshtml", ".vbhtml", ".config",
+    # Frontend / scripting
+    ".js", ".jsx", ".ts", ".tsx", ".html", ".htm", ".css", ".scss",
+    # Python
+    ".py",
+    # Data / docs
+    ".pdf", ".csv", ".docx", ".txt", ".md", ".yaml", ".yml", ".json",
+    # Archives
+    ".zip",
+}
 SKIP_DIRS = {"node_modules", ".git", "vendor", "__pycache__", ".idea", ".vscode", "dist", "build"}
 SKIP_FILE_PATTERNS = [
     re.compile(r"\.bak$", re.IGNORECASE),
