@@ -167,14 +167,33 @@ Full-stack legacy application migration assistant. FastAPI backend + React front
     - Added fallback to CLASSES + TABLES TOON slice when the configured `toon_focus` (e.g. `INDIVIDUALS`) doesn't exist in the TOON output.
     - Strengthened prompt to forbid empty/refusal responses.
   - Verified: ran full `/api/srs/generate` against `1376022c…` (TEST_LAMA_v4_bb4ae283, PHP). All 9 sections now populated: definitions=3536, overall_description=4767, functional_requirements=8538, non_functional_requirements=3226, use_cases=7867, constraints=2994, entity_model=4987. `version=1` persisted.
-- ✅ **Ontology Studio broken on large projects** — Root cause: O(N²) Fruchterman-Reingold force layout in `OntologyStudio.jsx` froze the browser on graphs with >1000 nodes (e.g. 4411-node Java project).
-  - `forceLayout()` now auto-scales iterations: 60 (≤200 nodes) → 40 → 24 → 12 (>800 nodes).
-  - `GraphView` enforces `MAX_GRAPH_NODES=500`, keeps the most-connected ones plus the currently-selected node when capped, and shows an amber banner explaining the cap.
-  - `OntologyStudioPage` auto-removes `Method` and `Column` from default visible types when total nodes >800 (they otherwise dominate Java/JSP projects).
-  - Verified via Playwright: 4411-node project now renders cleanly with 44 visible class nodes.
+- ✅ **Ontology Studio — Business Domain view (NEW)** — replaces the previous raw code-level graph (Classes/Methods/Tables/Columns) with a high-level **business entity** view based on user's choice [1c + 2b + 3a + caching + full detail panel].
+  - New backend module `/app/backend/kb/business_ontology.py`:
+    1. **Deterministic clustering** — groups tables by name prefix, classes by namespace / camelCase head, and surfaces cross-cluster FK relationships.
+    2. **LLM enrichment** — feeds the clusters to the model with a strict business-analyst prompt that returns JSON with entities (name, domain, description, backed_by_tables, implemented_in_classes, business_owner, lifecycle_states) + verb-based relationships ("User *owns* Project", "Doctor *prescribes* Medication").
+    3. **Composition + FK fallback** — combines LLM output with deterministic FK edges so no relationship is lost.
+    4. **Content-hash cache** — results stored in `business_ontologies` collection keyed by a SHA256 hash of the KB; the LLM only re-runs when the KB actually changes.
+  - New API endpoints (`/app/backend/routes/kb.py`):
+    * `GET  /api/kb/{pid}/business-ontology` — returns cached payload + `stale` flag if KB has drifted from cache.
+    * `POST /api/kb/{pid}/business-ontology/jobs/start` — background-job builder (bypasses K8s 60s ingress timeout for large KBs); returns cached result instantly when fresh.
+    * `GET  /api/kb/{pid}/business-ontology/jobs/{job_id}` — polling endpoint.
+    * `POST /api/kb/{pid}/business-ontology/regenerate` — synchronous force-refresh (small KBs only).
+  - Frontend `/app/frontend/src/pages/OntologyStudio.jsx` rewritten:
+    * Graph view: rounded entity boxes coloured per domain, verb labels on edges, FK relationships rendered as dashed grey lines, force-directed layout (auto-scaled iterations).
+    * Tree view: entities grouped by business domain.
+    * Detail panel: name, domain pill, description, business owner, lifecycle-state chips, backed-by-tables list, implemented-in-classes list, full relationship list (in/out with verbs), click-through navigation.
+    * Build-now / Regenerate workflow with progress bar + 2s polling.
+    * Stale-banner when KB has drifted since last build.
+    * Domain filter chips, search-by-name-or-description, Export JSON.
+  - New DB collection in `/app/backend/db.py`: `business_ontologies`.
+  - New API helpers in `/app/frontend/src/lib/api.js`: `getBusinessOntology`, `startBusinessOntologyJob`, `getBusinessOntologyJob`.
+  - **Verified end-to-end via Playwright**:
+    * Project `4f2bc845` (PHP Employee MS) → 10 business entities across 6 domains (HR, Finance, Payroll, Identity & Access, Reporting, Operations) with 7 verb-based relationships.
+    * Detail panel showed Employee → tables=[`employees`], owner=`HR Manager`, 7 relationships including "WORKS→Overtime", "RECEIVES→Cash Advance", "MANAGED BY Admin".
 
 ## Backlog (post-iter-12)
 - **P1** Continue OLTP / OLAP data-model generation quality refinement.
 - **P2** Verify GitHub un-stub path for Stage 4 CodeGen push end-to-end on a Hostinger VPS pull.
 - **P2** UI: add an "Auth health" pill in the Console showing whether the active provider's API key is actually working (avoids silent 401 chains).
 - **P2** Add a backend `/api/console/providers/validate/{id}` endpoint that does a 1-message ping to confirm provider key validity before saving it as default.
+- **P2** Persist `business_ontologies` snapshots for time-travel diffing (similar to the existing `ontology_snapshots` collection used by the old code-level studio).

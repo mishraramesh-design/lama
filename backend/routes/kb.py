@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Dict, List
 from datetime import datetime, timezone
 
-from db import kb_files, kb_chunks, kb_entities, kb_toon, projects, srs_documents, ontology_snapshots
+from db import kb_files, kb_chunks, kb_entities, kb_toon, projects, srs_documents, ontology_snapshots, business_ontologies
 from models import KBFile, KBStatus
 from kb.parsers import parse_file, chunk_text
 from kb.owl_extractor import extract, aggregate_stats
@@ -15,6 +15,12 @@ from kb.toon import serialise, summarise
 from kb.vector_store import index_chunks as qdrant_index, delete_project_vectors
 from kb.owl_export import export_owl
 from kb.module_inventory_parser import parse_module_inventory, generate_module_text_summary
+from kb.business_ontology import (
+    cluster_entities,
+    compute_kb_hash,
+    enrich_with_llm,
+    compose_business_ontology,
+)
 
 logger = logging.getLogger("lama.kb")
 
@@ -555,6 +561,157 @@ async def diff_ontology(project_id: str, a: str = "", b: str = "current"):
         "added_nodes": added_nodes, "removed_nodes": removed_nodes,
         "added_edges": added_edges, "removed_edges": removed_edges,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Business-Domain Ontology (deterministic clustering + LLM enrichment).
+# Replaces the raw code-level Class/Table/Column graph for users who want
+# to see real-world concepts (Citizen, Loan Application, Invoice, …).
+# ─────────────────────────────────────────────────────────────────────────
+import asyncio
+import time as _time
+from typing import Any as _Any
+
+_BIZ_JOBS: Dict[str, Dict[str, _Any]] = {}
+_BIZ_JOB_TTL = 60 * 30  # 30 minutes
+
+
+def _biz_gc():
+    now = _time.time()
+    for k in [k for k, v in _BIZ_JOBS.items() if v.get("ended_at") and now - v["ended_at"] > _BIZ_JOB_TTL]:
+        _BIZ_JOBS.pop(k, None)
+
+
+async def _build_business_ontology(project_id: str, force: bool = False) -> dict:
+    proj = await projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    entities = await kb_entities.find({"project_id": project_id}, {"_id": 0}).to_list(100000)
+    if not entities:
+        raise HTTPException(400, "KB is empty — upload files and build the KB first.")
+
+    kb_hash = compute_kb_hash(entities)
+    cached = await business_ontologies.find_one({"project_id": project_id}, {"_id": 0})
+    if cached and not force and cached.get("kb_hash") == kb_hash and cached.get("payload"):
+        return {**cached["payload"], "cached": True, "kb_hash": kb_hash,
+                "generated_at": cached.get("generated_at")}
+
+    clusters_pack = cluster_entities(entities)
+    llm_result = await enrich_with_llm(clusters_pack, proj, project_id)
+    payload = compose_business_ontology(clusters_pack, llm_result)
+
+    now = datetime.now(timezone.utc).isoformat()
+    await business_ontologies.update_one(
+        {"project_id": project_id},
+        {"$set": {
+            "project_id": project_id,
+            "kb_hash": kb_hash,
+            "payload": payload,
+            "generated_at": now,
+            "source": payload.get("source"),
+        }},
+        upsert=True,
+    )
+    return {**payload, "cached": False, "kb_hash": kb_hash, "generated_at": now}
+
+
+async def _biz_run(project_id: str, job_id: str, force: bool):
+    try:
+        _BIZ_JOBS[job_id]["status"] = "running"
+        result = await _build_business_ontology(project_id, force=force)
+        _BIZ_JOBS[job_id].update({
+            "status": "done",
+            "result": result,
+            "ended_at": _time.time(),
+            "progress": 1.0,
+        })
+    except Exception as exc:
+        _BIZ_JOBS[job_id].update({
+            "status": "error",
+            "error": str(exc)[:500],
+            "ended_at": _time.time(),
+        })
+
+
+@router.get("/{project_id}/business-ontology")
+async def get_business_ontology(project_id: str):
+    """Return the cached business-domain ontology for the project.
+    Returns 404 if it has never been generated — call jobs/start first."""
+    cached = await business_ontologies.find_one({"project_id": project_id}, {"_id": 0})
+    if not cached or not cached.get("payload"):
+        raise HTTPException(404, "No business ontology cached yet — call /business-ontology/jobs/start")
+    # Compare hash against current KB to surface staleness
+    entities = await kb_entities.find({"project_id": project_id}, {"_id": 0}).to_list(100000)
+    current_hash = compute_kb_hash(entities) if entities else ""
+    stale = bool(current_hash and current_hash != cached.get("kb_hash"))
+    return {
+        **cached["payload"],
+        "cached": True,
+        "kb_hash": cached.get("kb_hash"),
+        "current_kb_hash": current_hash,
+        "stale": stale,
+        "generated_at": cached.get("generated_at"),
+    }
+
+
+@router.post("/{project_id}/business-ontology/jobs/start")
+async def start_business_ontology_job(project_id: str, payload: dict | None = None):
+    """Kick off a background build of the business ontology. Returns a job_id
+    the client can poll. If a fresh cached copy exists and `force` is false,
+    returns the cached result immediately under `result` instead."""
+    force = bool((payload or {}).get("force", False))
+    _biz_gc()
+
+    proj = await projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    entities_count = await kb_entities.count_documents({"project_id": project_id})
+    if entities_count == 0:
+        raise HTTPException(400, "KB is empty — upload files and build the KB first.")
+
+    # If we already have a fresh cache, skip the job entirely.
+    if not force:
+        entities = await kb_entities.find({"project_id": project_id}, {"_id": 0}).to_list(100000)
+        current_hash = compute_kb_hash(entities)
+        cached = await business_ontologies.find_one({"project_id": project_id}, {"_id": 0})
+        if cached and cached.get("kb_hash") == current_hash and cached.get("payload"):
+            jid = uuid.uuid4().hex
+            _BIZ_JOBS[jid] = {
+                "id": jid, "project_id": project_id, "status": "done",
+                "started_at": _time.time(), "ended_at": _time.time(),
+                "progress": 1.0,
+                "result": {**cached["payload"], "cached": True,
+                           "kb_hash": current_hash, "generated_at": cached.get("generated_at")},
+            }
+            return {"job_id": jid, "status": "done", "cached": True}
+
+    jid = uuid.uuid4().hex
+    _BIZ_JOBS[jid] = {
+        "id": jid, "project_id": project_id, "status": "queued",
+        "started_at": _time.time(), "progress": 0.05,
+    }
+    asyncio.create_task(_biz_run(project_id, jid, force=force))
+    return {"job_id": jid, "status": "queued", "cached": False}
+
+
+@router.get("/{project_id}/business-ontology/jobs/{job_id}")
+async def get_business_ontology_job(project_id: str, job_id: str):
+    j = _BIZ_JOBS.get(job_id)
+    if not j or j.get("project_id") != project_id:
+        raise HTTPException(404, "Job not found (or expired)")
+    return {
+        "job_id": job_id,
+        "status": j.get("status"),
+        "progress": j.get("progress", 0.0),
+        "error": j.get("error"),
+        "result": j.get("result"),
+    }
+
+
+@router.post("/{project_id}/business-ontology/regenerate")
+async def regenerate_business_ontology(project_id: str):
+    """Force a fresh deterministic + LLM run (sync). Prefer jobs/start for big KBs."""
+    return await _build_business_ontology(project_id, force=True)
 
 
 @router.get("/{project_id}/glossary")

@@ -165,6 +165,14 @@ export const deleteOntologySnapshot = (projectId, snapshotId) =>
 export const diffOntology = (projectId, a, b = "current") =>
   api.get(`/kb/${projectId}/ontology/diff`, { params: { a, b } }).then((r) => r.data);
 
+// Business-domain ontology (deterministic clusters + LLM enrichment)
+export const getBusinessOntology = (projectId) =>
+  api.get(`/kb/${projectId}/business-ontology`).then((r) => r.data);
+export const startBusinessOntologyJob = (projectId, force = false) =>
+  api.post(`/kb/${projectId}/business-ontology/jobs/start`, { force }).then((r) => r.data);
+export const getBusinessOntologyJob = (projectId, jobId) =>
+  api.get(`/kb/${projectId}/business-ontology/jobs/${jobId}`).then((r) => r.data);
+
 // Living — Stage 5
 export const startLivingJob = (kind, projectId, extra = {}) =>
   api.post(`/living/jobs/start/${kind}`, { project_id: projectId, ...extra }).then((r) => r.data);
