@@ -3,10 +3,14 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Loader2, Network, ListTree, Search, Download,
   ZoomIn, ZoomOut, Maximize2, RotateCcw, Filter, Boxes,
+  GitCompare, Camera, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useProjects } from "@/state/ProjectContext";
-import { getOntology } from "@/lib/api";
+import {
+  getOntology, createOntologySnapshot, listOntologySnapshots,
+  deleteOntologySnapshot, diffOntology,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 // ────────────────────────────────────────────────────────────────────
@@ -345,6 +349,45 @@ export default function OntologyStudioPage() {
   const [selectedTypes, setSelectedTypes] = useState(new Set(Object.keys(TYPE_META)));
   const [search, setSearch] = useState("");
 
+  // Snapshots & diff
+  const [snapshots, setSnapshots] = useState([]);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [diffA, setDiffA] = useState("");
+  const [diffB, setDiffB] = useState("current");
+  const [diffResult, setDiffResult] = useState(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+
+  const refreshSnapshots = useCallback(async () => {
+    if (!projectId) return;
+    try { const r = await listOntologySnapshots(projectId); setSnapshots(r.snapshots || []); } catch { /* */ }
+  }, [projectId]);
+  useEffect(() => { refreshSnapshots(); }, [refreshSnapshots]);
+
+  const onSnapshot = async () => {
+    if (!projectId) return;
+    const name = window.prompt("Snapshot name?", `snapshot-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}`);
+    if (!name) return;
+    try {
+      const r = await createOntologySnapshot(projectId, name);
+      toast.success(`Saved snapshot "${r.name}" (${r.stats.total_nodes} nodes)`);
+      await refreshSnapshots();
+    } catch (e) { toast.error("Snapshot failed: " + (e?.response?.data?.detail || e.message)); }
+  };
+
+  const onDeleteSnapshot = async (id) => {
+    if (!window.confirm("Delete this snapshot?")) return;
+    try { await deleteOntologySnapshot(projectId, id); toast.success("Deleted"); refreshSnapshots(); }
+    catch { toast.error("Delete failed"); }
+  };
+
+  const onRunDiff = async () => {
+    if (!diffA) { toast.error("Pick a snapshot for side A first."); return; }
+    setDiffLoading(true);
+    try { const r = await diffOntology(projectId, diffA, diffB); setDiffResult(r); }
+    catch (e) { toast.error("Diff failed: " + (e?.response?.data?.detail || e.message)); }
+    finally { setDiffLoading(false); }
+  };
+
   const refresh = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
@@ -414,6 +457,13 @@ export default function OntologyStudioPage() {
               <ListTree className="w-3 h-3 inline mr-1" /> Tree
             </button>
           </div>
+          <Button onClick={onSnapshot} variant="outline" className="h-7 text-[11px]" data-testid="snapshot-btn">
+            <Camera className="w-3 h-3 mr-1" /> Snapshot
+          </Button>
+          <Button onClick={() => setDiffOpen(true)} variant="outline" className="h-7 text-[11px]" data-testid="open-diff-btn">
+            <GitCompare className="w-3 h-3 mr-1" /> Diff
+            {snapshots.length > 0 && <span className="ml-1 text-[9px] bg-[#FFE600] text-[#2E2E38] font-bold px-1 rounded-sm">{snapshots.length}</span>}
+          </Button>
           <Button onClick={exportJson} variant="outline" className="h-7 text-[11px]" data-testid="export-ontology">
             <Download className="w-3 h-3 mr-1" /> Export JSON
           </Button>
@@ -485,6 +535,135 @@ export default function OntologyStudioPage() {
         <div className="col-span-3 min-w-0 overflow-hidden border-l border-[#E6E6E6]">
           <DetailPanel node={selectedNode} neighbours={neighbours} onSelect={(n) => setSelectedId(n.id)} />
         </div>
+      </div>
+
+      {/* Diff modal */}
+      {diffOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" data-testid="diff-modal">
+          <div className="bg-white border-2 border-[#FFE600] rounded-sm w-full max-w-5xl h-[88vh] flex flex-col">
+            <div className="px-4 py-3 border-b border-[#E6E6E6] flex items-center justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-[#747480]">Ontology Diff</div>
+                <div className="text-sm font-display font-bold">Compare two snapshots (or any snapshot vs current)</div>
+              </div>
+              <button onClick={() => { setDiffOpen(false); setDiffResult(null); }} data-testid="diff-close" className="text-[#747480] hover:text-[#2E2E38]"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 border-b border-[#E6E6E6]">
+              {/* Side A */}
+              <div>
+                <div className="text-[10px] uppercase font-bold text-[#747480] mb-1">Side A</div>
+                <select value={diffA} onChange={(e) => setDiffA(e.target.value)} data-testid="diff-select-a" className="w-full text-[11px] border border-[#E6E6E6] rounded-sm px-2 py-1.5">
+                  <option value="">— pick a snapshot —</option>
+                  {snapshots.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} · {(s.stats || {}).total_nodes || 0} nodes · {(s.created_at || "").slice(0, 19).replace("T", " ")}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Side B */}
+              <div>
+                <div className="text-[10px] uppercase font-bold text-[#747480] mb-1">Side B</div>
+                <select value={diffB} onChange={(e) => setDiffB(e.target.value)} data-testid="diff-select-b" className="w-full text-[11px] border border-[#E6E6E6] rounded-sm px-2 py-1.5">
+                  <option value="current">Current ontology</option>
+                  {snapshots.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} · {(s.stats || {}).total_nodes || 0} nodes</option>
+                  ))}
+                </select>
+              </div>
+              {snapshots.length === 0 && (
+                <div className="md:col-span-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-sm p-2">
+                  No snapshots yet. Click <strong>Snapshot</strong> in the header to capture the current ontology, then re-upload files or re-build the KB, and come back here to diff.
+                </div>
+              )}
+              <div className="md:col-span-2 flex items-center gap-2">
+                <Button onClick={onRunDiff} disabled={!diffA || diffLoading} data-testid="diff-run" className="h-8 text-[11px] bg-[#FFE600] text-[#2E2E38] hover:bg-[#FFD500]">
+                  {diffLoading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <GitCompare className="w-3 h-3 mr-1" />} Compare
+                </Button>
+                {snapshots.length > 0 && (
+                  <details className="text-[10px] ml-auto">
+                    <summary className="cursor-pointer text-[#747480]">Manage snapshots ({snapshots.length})</summary>
+                    <div className="mt-1 space-y-0.5 max-h-32 overflow-y-auto">
+                      {snapshots.map((s) => (
+                        <div key={s.id} className="flex items-center gap-2 text-[10px]">
+                          <span className="font-mono truncate flex-1">{s.name}</span>
+                          <button onClick={() => onDeleteSnapshot(s.id)} className="text-rose-500 hover:bg-rose-50 rounded-sm p-0.5"><Trash2 className="w-3 h-3" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4" data-testid="diff-result">
+              {!diffResult && <div className="text-[11px] text-[#747480] text-center mt-12">Pick two sides and click Compare.</div>}
+              {diffResult && (
+                <div className="space-y-3">
+                  {/* Summary */}
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                    <SummaryStat label="Added nodes"   value={diffResult.summary.added_nodes}   tone="emerald" />
+                    <SummaryStat label="Removed nodes" value={diffResult.summary.removed_nodes} tone="rose" />
+                    <SummaryStat label="Unchanged"     value={diffResult.summary.unchanged_nodes} tone="slate" />
+                    <SummaryStat label="Added edges"   value={diffResult.summary.added_edges}   tone="emerald" />
+                    <SummaryStat label="Removed edges" value={diffResult.summary.removed_edges} tone="rose" />
+                  </div>
+                  {/* By-type delta */}
+                  {Object.keys(diffResult.summary.by_type_delta || {}).length > 0 && (
+                    <div className="bg-white border border-[#E6E6E6] rounded-sm p-3">
+                      <div className="text-[10px] uppercase font-bold text-[#747480] mb-1">Net change by type</div>
+                      <div className="flex gap-2 flex-wrap">
+                        {Object.entries(diffResult.summary.by_type_delta).map(([t, d]) => (
+                          <span key={t} className={`text-[10px] px-1.5 py-0.5 rounded-sm font-mono ${d > 0 ? "bg-emerald-100 text-emerald-700" : d < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-600"}`}>
+                            {t}: {d > 0 ? `+${d}` : d}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Added / Removed lists */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <DiffNodeList title="Added" tone="emerald" nodes={diffResult.added_nodes} />
+                    <DiffNodeList title="Removed" tone="rose" nodes={diffResult.removed_nodes} />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryStat({ label, value, tone }) {
+  const t = {
+    emerald: "bg-emerald-50 border-emerald-200 text-emerald-700",
+    rose:    "bg-rose-50 border-rose-200 text-rose-700",
+    slate:   "bg-slate-50 border-slate-200 text-slate-600",
+  }[tone] || "";
+  return (
+    <div className={`border rounded-sm p-2 ${t}`}>
+      <div className="text-[9px] uppercase font-bold opacity-80">{label}</div>
+      <div className="text-lg font-display font-bold leading-none mt-1">{value}</div>
+    </div>
+  );
+}
+
+function DiffNodeList({ title, tone, nodes }) {
+  const t = tone === "emerald" ? "border-emerald-200 bg-emerald-50/30" : "border-rose-200 bg-rose-50/30";
+  return (
+    <div className={`border ${t} rounded-sm p-2`}>
+      <div className="text-[10px] uppercase font-bold text-[#747480] mb-1">{title} ({nodes.length})</div>
+      <div className="space-y-0.5 max-h-72 overflow-y-auto">
+        {nodes.length === 0 && <div className="text-[11px] text-[#747480]">None.</div>}
+        {nodes.map((n, i) => {
+          const meta = TYPE_META[n.type] || {};
+          return (
+            <div key={i} className="flex items-center gap-1 text-[11px]" style={{ color: meta.color }}>
+              <span className="text-[9px] uppercase font-bold w-12 truncate">{n.type}</span>
+              <span className="font-mono truncate">{n.label}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

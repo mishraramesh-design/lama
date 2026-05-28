@@ -42,3 +42,8 @@ token_usage_log = db.token_usage_log
 
 # GitHub configs (also referenced in routes/codegen.py)
 github_configs = db.github_configs
+
+# Stage 5 — Living System (Selenium / JMeter / Drift / SRS-diff)
+living_artifacts = db.living_artifacts
+living_runs = db.living_runs
+ontology_snapshots = db.ontology_snapshots

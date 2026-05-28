@@ -10,6 +10,7 @@ import ArchitecturePage from "@/pages/Architecture";
 import CodeGenPage from "@/pages/CodeGen";
 import ConsolePage from "@/pages/Console";
 import OntologyStudioPage from "@/pages/OntologyStudio";
+import LivingPage from "@/pages/Living";
 import StagePlaceholderPage from "@/pages/StagePlaceholder";
 import PromptLibraryPage from "@/pages/PromptLibrary";
 import AuditLogPage from "@/pages/AuditLog";
@@ -34,7 +35,7 @@ function App() {
           <Route path="/data-model" element={<Shell><DataModelPage /></Shell>} />
           <Route path="/architecture" element={<Shell><ArchitecturePage /></Shell>} />
           <Route path="/code-gen" element={<Shell><CodeGenPage /></Shell>} />
-          <Route path="/living" element={<Shell><StagePlaceholderPage stage="Living" /></Shell>} />
+          <Route path="/living" element={<Shell><LivingPage /></Shell>} />
           <Route path="/prompts" element={<Shell><PromptLibraryPage /></Shell>} />
           <Route path="/console" element={<Shell><ConsolePage /></Shell>} />
           <Route path="/ontology-studio" element={<Shell><OntologyStudioPage /></Shell>} />

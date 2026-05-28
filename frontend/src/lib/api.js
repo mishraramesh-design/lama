@@ -156,6 +156,34 @@ export const resetCodegen = (projectId) =>
 
 export const getOntology = (projectId) =>
   api.get(`/kb/${projectId}/ontology`).then((r) => r.data);
+export const createOntologySnapshot = (projectId, name) =>
+  api.post(`/kb/${projectId}/ontology/snapshot`, { name }).then((r) => r.data);
+export const listOntologySnapshots = (projectId) =>
+  api.get(`/kb/${projectId}/ontology/snapshots`).then((r) => r.data);
+export const deleteOntologySnapshot = (projectId, snapshotId) =>
+  api.delete(`/kb/${projectId}/ontology/snapshot/${snapshotId}`).then((r) => r.data);
+export const diffOntology = (projectId, a, b = "current") =>
+  api.get(`/kb/${projectId}/ontology/diff`, { params: { a, b } }).then((r) => r.data);
+
+// Living — Stage 5
+export const startLivingJob = (kind, projectId, extra = {}) =>
+  api.post(`/living/jobs/start/${kind}`, { project_id: projectId, ...extra }).then((r) => r.data);
+export const getLivingJob = (jobId) =>
+  api.get(`/living/jobs/${jobId}`).then((r) => r.data);
+export const listLivingArtifacts = (projectId) =>
+  api.get(`/living/${projectId}/artifacts`).then((r) => r.data);
+export const getLivingArtifact = (projectId, artId) =>
+  api.get(`/living/${projectId}/artifact/${artId}`).then((r) => r.data);
+export const updateLivingArtifact = (projectId, artId, files) =>
+  api.put(`/living/${projectId}/artifact/${artId}`, { files }).then((r) => r.data);
+export const freezeLivingArtifact = (projectId, artId) =>
+  api.post(`/living/${projectId}/artifact/${artId}/freeze`).then((r) => r.data);
+export const downloadLivingArtifactUrl = (projectId, artId) =>
+  `${API}/living/${projectId}/artifact/${artId}/download`;
+export const freezeLiving = (projectId) =>
+  api.post(`/living/${projectId}/freeze`).then((r) => r.data);
+export const resetLiving = (projectId) =>
+  api.post(`/living/${projectId}/reset`).then((r) => r.data);
 
 // Console — Model Fabric
 export const setupProvider = (data) =>

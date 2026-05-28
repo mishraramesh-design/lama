@@ -629,14 +629,152 @@ Return markdown only. No preamble.""",
     {
         "key": "test.selenium",
         "stage": "Living",
+        "force_update": True,
         "description": "Generates Selenium acceptance tests.",
-        "template": "Write Selenium tests for the use case {use_case}.",
+        "template": """You are a senior QA automation engineer.
+Generate Selenium WebDriver acceptance tests in JAVA + JUnit 5 for the use cases below.
+
+PROJECT: {project_name}
+TARGET STACK: {target_tech}
+
+USE CASES (from SRS):
+{use_cases}
+
+API CONTRACTS / ROUTES (from architecture):
+{routes}
+
+═════════════════════════════════════════════════════════════════
+HARD RULES — production-quality test code only
+═════════════════════════════════════════════════════════════════
+1. One Java class per use case, named <UseCaseName>Test (PascalCase).
+2. Use Page Object Model — create a separate <PageName>Page.java for each
+   distinct screen, with `@FindBy` locators and action methods.
+3. Use JUnit 5 (`@Test`, `@BeforeAll`, `@AfterEach`), AssertJ for fluent
+   assertions, and WebDriverManager for driver bootstrap.
+4. Every test must:
+   - Set up an isolated browser session.
+   - Use explicit waits (WebDriverWait) — NEVER Thread.sleep.
+   - Take a screenshot on failure (use `@ExtendWith(ScreenshotExtension.class)`).
+   - Assert at least one positive AND one negative scenario.
+5. Group by module: package com.lama.tests.<module_slug>.
+6. Add Javadoc on every test method linking back to SRS-UC-XX.
+
+OUTPUT — pure code, NO markdown fences. Use this exact layout, one file per
+class, prefixed by an `=== FILE: <relative_path> ===` marker so the runtime
+can split the response into individual files:
+
+=== FILE: src/test/java/com/lama/tests/auth/LoginTest.java ===
+package com.lama.tests.auth;
+...
+=== FILE: src/test/java/com/lama/tests/auth/LoginPage.java ===
+...""",
+    },
+    {
+        "key": "test.jmeter",
+        "stage": "Living",
+        "force_update": True,
+        "description": "Generates Apache JMeter performance test plans (.jmx).",
+        "template": """You are a senior performance engineer.
+Generate an Apache JMeter test plan (.jmx — XML) that exercises the production
+API endpoints under realistic load.
+
+PROJECT: {project_name}
+BASE URL: {base_url}
+API ENDPOINTS (verb + path, from architecture):
+{endpoints}
+
+NON-FUNCTIONAL TARGETS (from SRS):
+{nfr_summary}
+
+═════════════════════════════════════════════════════════════════
+HARD RULES
+═════════════════════════════════════════════════════════════════
+1. ONE master Test Plan (`jmeterTestPlan version="1.2"`) per response.
+2. Thread Groups by user persona:
+   - Anonymous (browse/health) — 20 users, 60s ramp
+   - Authenticated (CRUD) — 50 users, 120s ramp
+   - Admin (heavy queries) — 5 users, 30s ramp
+3. Each request:
+   - HTTPSampler with method + path + body (parameterised via CSV Data Set)
+   - Header Manager with `Content-Type: application/json` + `Authorization`
+   - Response Assertion (200/201/204 — adjust per verb)
+   - Duration Assertion ≤ 1500ms for GETs, ≤ 3000ms for writes
+4. Insert a CSV Data Set Config that points to `test-data/<endpoint>_data.csv`
+   so the .jmx is dataset-driven (no hardcoded payloads).
+5. Listeners (DISABLED by default for CI):
+   - Summary Report
+   - Aggregate Report
+   - Backend Listener for InfluxDB/Grafana
+6. Plugin requirements at top of file in a `<!-- requires: -->` comment block:
+   jmeter-plugins-graphs-basic, jmeter-plugins-cmd, jmeter-plugins-casutg.
+
+OUTPUT — pure XML, NO markdown, one file per response. Begin with:
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+...
+</jmeterTestPlan>""",
+    },
+    {
+        "key": "drift.detector",
+        "stage": "Living",
+        "force_update": True,
+        "description": "Detects drift between the frozen SRS and the live deployed application.",
+        "template": """You are a senior software architect doing a drift audit.
+Compare the frozen SRS (source of truth) against signals collected from the
+running system (logs, telemetry, schema introspection). Report ONLY observable
+gaps with severity classification.
+
+SRS FUNCTIONAL REQUIREMENTS:
+{srs_functional}
+
+CURRENT SYSTEM SIGNALS (live):
+{live_signals}
+
+OUTPUT — markdown report with these EXACT sections:
+## Drift Summary
+- N requirements covered fully
+- N requirements partially covered
+- N requirements missing
+
+## Critical Drift (P0)
+| SRS-FR | Expected | Observed | Recommended action |
+| --- | --- | --- | --- |
+...
+
+## Major Drift (P1)
+...
+
+## Minor Drift (P2)
+...
+
+## Recommendations
+1. ...
+
+Be ruthless and specific. Cite the exact SRS-FR-XX id on every row.""",
     },
     {
         "key": "diff.srs",
         "stage": "Living",
+        "force_update": True,
         "description": "Diffs two SRS versions and produces a change report.",
-        "template": "Compare two SRS versions and list changes:\nA:\n{srs_a}\nB:\n{srs_b}",
+        "template": """Compare two SRS versions and produce a precise change report.
+
+OLD (Version A):
+{srs_a}
+
+NEW (Version B):
+{srs_b}
+
+OUTPUT — markdown:
+## Added
+- Section, Requirement-ID, summary
+## Removed
+- ...
+## Modified
+- ...
+## Impact Assessment
+- Which downstream artifacts (data model, code, tests) need regeneration?
+""",
     },
 ]
 
@@ -707,6 +845,19 @@ async def seed_agents():
         {"key": "orchestrator.living", "agent_type": "orchestrator", "stage": "Living",
          "label": "Living SRS Orchestrator", "description": "Manages diff SRS → test generation pipeline.",
          "complexity": "medium", "max_tokens": 2048},
+        # Living
+        {"key": "test.selenium", "agent_type": "task", "stage": "Living",
+         "label": "Selenium Test Generator", "description": "Generates JUnit5 + Selenium acceptance tests for each use case.",
+         "complexity": "medium", "max_tokens": 6000},
+        {"key": "test.jmeter", "agent_type": "task", "stage": "Living",
+         "label": "JMeter Plan Generator", "description": "Generates Apache JMeter (.jmx) performance test plans per persona.",
+         "complexity": "medium", "max_tokens": 8000},
+        {"key": "drift.detector", "agent_type": "task", "stage": "Living",
+         "label": "Drift Detector", "description": "Compares frozen SRS against live signals and reports gaps.",
+         "complexity": "high", "max_tokens": 5000},
+        {"key": "diff.srs", "agent_type": "task", "stage": "Living",
+         "label": "SRS Diff", "description": "Diffs two SRS snapshots and proposes which artifacts to regenerate.",
+         "complexity": "medium", "max_tokens": 4000},
         # Discovery
         {"key": "srs.gap_question", "agent_type": "task", "stage": "Discovery",
          "label": "SRS Gap Questioner", "description": "Asks one clarifying question per turn from KB.",

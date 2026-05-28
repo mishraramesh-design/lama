@@ -1,12 +1,13 @@
 """Knowledge Base endpoints: upload, build, status, scan-folder."""
 import os
 import re
+import uuid
 import logging
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from typing import List
+from typing import Dict, List
 from datetime import datetime, timezone
 
-from db import kb_files, kb_chunks, kb_entities, kb_toon, projects, srs_documents
+from db import kb_files, kb_chunks, kb_entities, kb_toon, projects, srs_documents, ontology_snapshots
 from models import KBFile, KBStatus
 from kb.parsers import parse_file, chunk_text
 from kb.owl_extractor import extract, aggregate_stats
@@ -465,6 +466,94 @@ async def get_ontology(project_id: str):
         },
         "nodes": nodes,
         "edges": edges,
+    }
+
+
+@router.post("/{project_id}/ontology/snapshot")
+async def create_ontology_snapshot(project_id: str, payload: dict = None):
+    """Save the current ontology as a named snapshot (for later diff)."""
+    proj = await projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    name = (payload or {}).get("name", "").strip() or f"snapshot-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+    # Re-use get_ontology aggregation
+    onto = await get_ontology(project_id)
+    snap_id = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).isoformat()
+    await ontology_snapshots.insert_one({
+        "id": snap_id, "project_id": project_id, "name": name,
+        "nodes": onto["nodes"], "edges": onto["edges"], "stats": onto["stats"],
+        "created_at": now,
+    })
+    return {"snapshot_id": snap_id, "name": name, "created_at": now, "stats": onto["stats"]}
+
+
+@router.get("/{project_id}/ontology/snapshots")
+async def list_ontology_snapshots(project_id: str):
+    rows = await ontology_snapshots.find(
+        {"project_id": project_id}, {"_id": 0, "nodes": 0, "edges": 0}
+    ).sort("created_at", -1).to_list(100)
+    return {"snapshots": rows, "count": len(rows)}
+
+
+@router.delete("/{project_id}/ontology/snapshot/{snapshot_id}")
+async def delete_ontology_snapshot(project_id: str, snapshot_id: str):
+    r = await ontology_snapshots.delete_one({"id": snapshot_id, "project_id": project_id})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Snapshot not found")
+    return {"ok": True}
+
+
+@router.get("/{project_id}/ontology/diff")
+async def diff_ontology(project_id: str, a: str = "", b: str = "current"):
+    """Diff two ontology states.
+    - `a` is a snapshot_id (required)
+    - `b` is either another snapshot_id or the literal "current" (default)
+    Returns added / removed / unchanged nodes and edges.
+    """
+    if not a:
+        raise HTTPException(400, "query param 'a' (snapshot_id) is required")
+    snap_a = await ontology_snapshots.find_one({"id": a, "project_id": project_id}, {"_id": 0})
+    if not snap_a:
+        raise HTTPException(404, "Snapshot A not found")
+    if b == "current":
+        snap_b = await get_ontology(project_id)
+        snap_b_name = "Current"
+    else:
+        snap_b = await ontology_snapshots.find_one({"id": b, "project_id": project_id}, {"_id": 0})
+        if not snap_b:
+            raise HTTPException(404, "Snapshot B not found")
+        snap_b_name = snap_b.get("name", "")
+
+    a_node_ids = {n["id"] for n in snap_a.get("nodes", [])}
+    b_node_ids = {n["id"] for n in snap_b.get("nodes", [])}
+    a_edges = {(e["source"], e["target"], e.get("kind", "")) for e in snap_a.get("edges", [])}
+    b_edges = {(e["source"], e["target"], e.get("kind", "")) for e in snap_b.get("edges", [])}
+
+    added_nodes = [n for n in snap_b.get("nodes", []) if n["id"] not in a_node_ids]
+    removed_nodes = [n for n in snap_a.get("nodes", []) if n["id"] not in b_node_ids]
+    unchanged_node_ids = a_node_ids & b_node_ids
+
+    added_edges = [{"source": s, "target": t, "kind": k} for (s, t, k) in (b_edges - a_edges)]
+    removed_edges = [{"source": s, "target": t, "kind": k} for (s, t, k) in (a_edges - b_edges)]
+
+    by_type_delta: Dict[str, int] = {}
+    for n in added_nodes:
+        by_type_delta[n["type"]] = by_type_delta.get(n["type"], 0) + 1
+    for n in removed_nodes:
+        by_type_delta[n["type"]] = by_type_delta.get(n["type"], 0) - 1
+
+    return {
+        "a": {"id": a, "name": snap_a.get("name", ""), "created_at": snap_a.get("created_at", "")},
+        "b": {"id": b, "name": snap_b_name, "created_at": snap_b.get("created_at", "")},
+        "summary": {
+            "added_nodes": len(added_nodes), "removed_nodes": len(removed_nodes),
+            "unchanged_nodes": len(unchanged_node_ids),
+            "added_edges": len(added_edges), "removed_edges": len(removed_edges),
+            "by_type_delta": by_type_delta,
+        },
+        "added_nodes": added_nodes, "removed_nodes": removed_nodes,
+        "added_edges": added_edges, "removed_edges": removed_edges,
     }
 
 
