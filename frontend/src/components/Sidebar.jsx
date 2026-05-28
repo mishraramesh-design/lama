@@ -146,7 +146,7 @@ export default function Sidebar() {
             </div>
             <div>
               <div className="font-display font-bold text-xl leading-none tracking-tight text-[#2E2E38]" data-testid="brand-name">LAMA</div>
-              <div className="text-[10px] uppercase tracking-widest text-[#747480] mt-1 leading-tight">Legacy Application<br/>Modernization &amp; Alignment</div>
+              <div className="text-[10px] uppercase tracking-widest text-[#747480] mt-1 leading-tight">Legacy Application<br/>Modernisation AI Studio</div>
             </div>
           </div>
           <button

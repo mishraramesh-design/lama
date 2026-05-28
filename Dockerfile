@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------
-# LAMA — Legacy Application Modernization & Alignment
+# LAMA — Legacy Application Modernisation AI Studio
 # Single-image bundle (frontend + backend + MongoDB + Nginx).
 #
 # Public port: 8382 (configurable at runtime by remapping)

@@ -1,5 +1,5 @@
 # docker-compose.yml
-# LAMA — Legacy Application Modernization & Alignment
+# LAMA — Legacy Application Modernisation AI Studio
 #
 # Hostinger Docker Manager usage:
 #   1. Create an .env file in the same directory (copy from .env.example).
