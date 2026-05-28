@@ -28,20 +28,25 @@ const TABS = [
 // poll a job until completion
 function useJob(getter, onComplete) {
   const [job, setJob] = useState(null);
+  const stopRef = React.useRef(false);
+  const timerRef = React.useRef(null);
+  useEffect(() => () => {
+    stopRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
   const start = useCallback((jid) => {
+    stopRef.current = false;
     setJob({ id: jid, status: "queued", step: "queued", pct: 0 });
-    let stopped = false;
     const tick = async () => {
-      if (stopped) return;
+      if (stopRef.current) return;
       try {
         const j = await getter(jid);
         setJob(j);
         if (j.status === "complete" || j.status === "error") { onComplete && onComplete(j); return; }
       } catch { /* */ }
-      setTimeout(tick, 2000);
+      if (!stopRef.current) timerRef.current = setTimeout(tick, 2000);
     };
     tick();
-    return () => { stopped = true; };
   }, [getter, onComplete]);
   return { job, start, reset: () => setJob(null) };
 }

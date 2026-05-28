@@ -255,6 +255,7 @@ async def start_srs_diff(payload: dict):
     project_id = payload.get("project_id")
     if not project_id:
         raise HTTPException(400, "project_id required")
+    await require_stage_context(project_id, "CodeGen", "Living")
     srs_a = (payload.get("srs_a") or "").strip()
     srs_b = (payload.get("srs_b") or "").strip()
     if not srs_a or not srs_b:
