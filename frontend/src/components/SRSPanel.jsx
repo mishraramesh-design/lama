@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { FileDown, Lock, Unlock, RefreshCw, Sparkles, Loader2, ChevronRight, Pencil, Check, X } from "lucide-react";
+import { FileDown, Lock, Unlock, RefreshCw, Sparkles, Loader2, ChevronRight, Pencil, Check, X, Code } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getSRS, updateSRSSection, freezeSRS, unfreezeSRS, srsPdfUrl, API } from "@/lib/api";
@@ -45,6 +45,9 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
   const [doneSections, setDoneSections] = useState(new Set());
   const [editingSection, setEditingSection] = useState(null);
   const [editContent, setEditContent] = useState("");
+  const [rawEditOpen, setRawEditOpen] = useState(false);
+  const [rawBuf, setRawBuf] = useState("");
+  const [savingRaw, setSavingRaw] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -187,6 +190,23 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
           >
             {generating ? <RefreshCw className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1" />}
             {hasContent ? "Regenerate" : "Generate"}
+          </Button>
+          <Button
+            data-testid="edit-raw-srs-btn"
+            variant="secondary"
+            size="sm"
+            disabled={!hasContent || frozen}
+            onClick={() => {
+              const blob = SECTIONS.map((s) => {
+                const c = (srs?.sections || {})[s.key] || "";
+                return `<!-- SECTION:${s.key} -->\n## ${s.label}\n\n${c.trim()}`;
+              }).join("\n\n");
+              setRawBuf(blob);
+              setRawEditOpen(true);
+            }}
+            className="bg-white border border-[#E6E6E6] hover:bg-[#F6F6FA] text-[#2E2E38] rounded-sm text-xs h-8"
+          >
+            <Code className="w-3.5 h-3.5 mr-1" /> Edit raw
           </Button>
           <Button
             data-testid="export-pdf-btn"
@@ -362,6 +382,71 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
           </div>
         </div>
       </div>
+
+      {/* Raw markdown edit modal (escape hatch when chat-edit isn't enough) */}
+      {rawEditOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" data-testid="raw-edit-modal">
+          <div className="bg-white rounded-sm w-full max-w-5xl h-[85vh] flex flex-col border-2 border-[#FFE600]">
+            <div className="px-4 py-3 border-b border-[#E6E6E6] flex items-center justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-[#747480]">Edit raw SRS markdown</div>
+                <div className="text-sm font-display font-bold">
+                  Keep the <code className="text-[11px] bg-[#F6F6FA] px-1">{`<!-- SECTION:key -->`}</code> markers — they split the document back into the 9 sections on save.
+                </div>
+              </div>
+              <button onClick={() => setRawEditOpen(false)} className="text-[#747480] hover:text-[#2E2E38]" data-testid="raw-edit-close"><X className="w-4 h-4" /></button>
+            </div>
+            <textarea
+              value={rawBuf}
+              onChange={(e) => setRawBuf(e.target.value)}
+              data-testid="raw-edit-textarea"
+              className="flex-1 min-h-0 p-3 font-mono text-[12px] outline-none resize-none w-full"
+              spellCheck={false}
+            />
+            <div className="px-4 py-3 border-t border-[#E6E6E6] flex items-center justify-between bg-[#FAFAFC]">
+              <div className="text-[10px] text-[#747480]">{rawBuf.length.toLocaleString()} chars · ~{Math.round(rawBuf.length / 4).toLocaleString()} tokens</div>
+              <div className="flex items-center gap-1.5">
+                <Button onClick={() => setRawEditOpen(false)} variant="outline" className="h-7 text-[11px]" data-testid="raw-edit-cancel">Cancel</Button>
+                <Button
+                  data-testid="raw-edit-save"
+                  disabled={savingRaw}
+                  onClick={async () => {
+                    setSavingRaw(true);
+                    try {
+                      // Split rawBuf back into sections using the markers
+                      const re = /<!--\s*SECTION:([a-z_]+)\s*-->/g;
+                      const matches = [];
+                      let m;
+                      while ((m = re.exec(rawBuf)) !== null) matches.push({ key: m[1], start: m.index, end: m.index + m[0].length });
+                      const blocks = {};
+                      for (let i = 0; i < matches.length; i++) {
+                        const next = matches[i + 1];
+                        const body = rawBuf.slice(matches[i].end, next ? next.start : rawBuf.length);
+                        // Strip the leading "## Heading" line that follows the marker
+                        blocks[matches[i].key] = body.replace(/^\s*##[^\n]*\n+/, "").trim();
+                      }
+                      let saved = 0;
+                      for (const s of SECTIONS) {
+                        const content = blocks[s.key] ?? "";
+                        await updateSRSSection(projectId, s.key, content);
+                        saved += 1;
+                      }
+                      toast.success(`Saved ${saved} section(s)`);
+                      setRawEditOpen(false);
+                      await refresh();
+                    } catch (e) {
+                      toast.error("Save failed: " + (e?.response?.data?.detail || e.message));
+                    } finally { setSavingRaw(false); }
+                  }}
+                  className="h-7 text-[11px] bg-[#FFE600] text-[#2E2E38] hover:bg-[#FFD500] font-bold"
+                >
+                  {savingRaw ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Check className="w-3 h-3 mr-1" />} Save all sections
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

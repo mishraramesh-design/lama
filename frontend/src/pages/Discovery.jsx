@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ChevronLeft, ChevronRight, Boxes } from "lucide-react";
 import { useProjects } from "@/state/ProjectContext";
 import UploadPanel from "@/components/UploadPanel";
 import ChatPanel from "@/components/ChatPanel";
@@ -57,9 +58,20 @@ export default function DiscoveryPage() {
           <div className="text-[10px] uppercase tracking-widest text-[#747480]">Stage 1 of 5</div>
           <h1 className="font-display text-lg font-bold tracking-tight text-[#2E2E38]">Discovery &amp; SRS</h1>
         </div>
-        <div className="text-right">
-          <div className="text-[10px] uppercase tracking-widest text-[#747480]">Project</div>
-          <div className="text-sm font-semibold text-[#2E2E38]">{active.name}</div>
+        <div className="flex items-center gap-3">
+          <Link
+            to="/ontology-studio"
+            data-testid="open-ontology-studio"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider px-3 py-1.5 bg-[#2E2E38] text-white hover:bg-[#FFE600] hover:text-[#2E2E38] rounded-sm transition-colors"
+          >
+            <Boxes className="w-3 h-3" /> Ontology Studio
+          </Link>
+          <div className="text-right">
+            <div className="text-[10px] uppercase tracking-widest text-[#747480]">Project</div>
+            <div className="text-sm font-semibold text-[#2E2E38]">{active.name}</div>
+          </div>
         </div>
       </header>
 

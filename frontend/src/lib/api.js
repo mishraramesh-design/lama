@@ -154,6 +154,9 @@ export const freezeCodegen = (projectId) =>
 export const resetCodegen = (projectId) =>
   api.post(`/codegen/${projectId}/reset`).then((r) => r.data);
 
+export const getOntology = (projectId) =>
+  api.get(`/kb/${projectId}/ontology`).then((r) => r.data);
+
 // Console — Model Fabric
 export const setupProvider = (data) =>
   api.post("/console/providers/setup", data).then((r) => r.data);

@@ -344,6 +344,130 @@ async def get_toon(project_id: str):
     return doc
 
 
+@router.get("/{project_id}/ontology")
+async def get_ontology(project_id: str):
+    """Return a nodes/edges graph of all extracted ontology elements for the
+    Ontology Studio visualiser. Pure JSON — no LLM call."""
+    proj = await projects.find_one({"id": project_id}, {"_id": 0})
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    entities = await kb_entities.find({"project_id": project_id}, {"_id": 0}).to_list(100000)
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    node_ids: set[str] = set()
+    type_counts: dict[str, int] = {}
+
+    def add_node(nid: str, ntype: str, label: str, **meta):
+        if nid in node_ids:
+            return
+        node_ids.add(nid)
+        nodes.append({"id": nid, "type": ntype, "label": label, **meta})
+        type_counts[ntype] = type_counts.get(ntype, 0) + 1
+
+    def add_edge(src: str, dst: str, kind: str):
+        if src in node_ids and dst in node_ids:
+            edges.append({"source": src, "target": dst, "kind": kind})
+
+    for e in entities:
+        et = e.get("type", "")
+        src = e.get("source", "")
+
+        if et == "CLASS":
+            cid = f"class:{e.get('namespace', '')}.{e['name']}"
+            add_node(cid, "Class", e["name"],
+                     namespace=e.get("namespace", ""),
+                     source=src,
+                     extends=e.get("extends", ""),
+                     implements=e.get("implements", []),
+                     is_jpa_entity=e.get("is_jpa_entity", False))
+            if e.get("extends"):
+                pid = f"class:{e['extends']}"
+                add_node(pid, "Class", e["extends"], synthetic=True)
+                add_edge(cid, pid, "extends")
+            for impl in (e.get("implements") or []):
+                iid = f"interface:{impl}"
+                add_node(iid, "Interface", impl, synthetic=True)
+                add_edge(cid, iid, "implements")
+            for m in (e.get("methods") or []):
+                mid = f"method:{cid}#{m['name']}"
+                add_node(mid, "Method", m["name"],
+                         params=m.get("params", ""), tables=m.get("tables", []),
+                         sessions=m.get("sessions", []), parent_class=cid)
+                add_edge(cid, mid, "has_method")
+                for t in (m.get("tables") or []):
+                    tid = f"table:{t}"
+                    add_node(tid, "Table", t)
+                    add_edge(mid, tid, "uses_table")
+
+        elif et == "TABLE":
+            tid = f"table:{e['name']}"
+            add_node(tid, "Table", e["name"],
+                     columns=e.get("columns", []),
+                     source=src)
+            for c in (e.get("columns") or []):
+                cid = f"col:{e['name']}.{c.get('name', '')}"
+                add_node(cid, "Column", c.get("name", ""),
+                         data_type=c.get("type", ""), is_pk=c.get("is_pk", False),
+                         is_fk=c.get("is_fk", False), parent_table=tid)
+                add_edge(tid, cid, "has_column")
+                if c.get("references"):
+                    ref_tid = f"table:{c['references']}"
+                    add_node(ref_tid, "Table", c["references"], synthetic=True)
+                    add_edge(tid, ref_tid, "references")
+
+        elif et == "TABLE_HINT":
+            tid = f"table:{e['name']}"
+            add_node(tid, "Table", e["name"], hint_from=src,
+                     via=e.get("via", ""))
+
+        elif et == "ROUTE":
+            rid = f"route:{e.get('verb', '')}:{e['name']}"
+            add_node(rid, "Route", e["name"],
+                     verb=e.get("verb", ""), handler=e.get("handler", ""),
+                     source=src)
+
+        elif et == "JSP_FORM":
+            fid = f"jspform:{e.get('action', '')}:{src}"
+            add_node(fid, "JspForm", e.get("action", ""), source=src)
+            # Try to link to a matching route
+            for n in nodes:
+                if n["type"] == "Route" and n["label"].rstrip("/") == e.get("action", "").rstrip("/"):
+                    add_edge(fid, n["id"], "posts_to")
+                    break
+
+        elif et == "JSP_INCLUDE":
+            iid = f"jspinclude:{e.get('file', '')}:{src}"
+            add_node(iid, "JspInclude", e.get("file", ""), source=src)
+
+        elif et == "JSP_TABLE_REFS":
+            for t in (e.get("tables") or []):
+                add_node(f"table:{t}", "Table", t, hint_from=src)
+
+        elif et == "ROLE":
+            rid = f"role:{e['name']}"
+            add_node(rid, "Role", e["name"], source=src)
+
+        elif et == "RELATIONSHIP":
+            # Direct table-to-table FK relationship
+            a = f"table:{e.get('from', '')}"
+            b = f"table:{e.get('to', '')}"
+            add_node(a, "Table", e.get("from", ""), synthetic=True)
+            add_node(b, "Table", e.get("to", ""), synthetic=True)
+            add_edge(a, b, e.get("kind", "references"))
+
+    return {
+        "project_id": project_id,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "by_type": type_counts,
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 @router.get("/{project_id}/glossary")
 async def get_glossary(project_id: str):
     """Return key terms for type-ahead suggestions."""

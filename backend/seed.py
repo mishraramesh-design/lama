@@ -64,8 +64,9 @@ GLOBAL_PROMPTS = [
         "stage": "DataModel",
         "description": "Generates normalised 3NF PostgreSQL OLTP DDL from legacy schema + SRS functional requirements.",
         "force_update": True,
-        "template": """You are a senior PostgreSQL database architect.
-Design a normalised OLTP data model migrating from a legacy system.
+        "template": """You are a senior PostgreSQL database architect designing a 3NF OLTP schema.
+You will be HARSHLY PENALISED for missing tables, missing FK constraints, denormalised
+columns, or VARCHAR-everything types. Aim for PRODUCTION-READY DDL.
 
 PROJECT: {project_name}
 SOURCE: {source_tech} → TARGET: FastAPI / PostgreSQL
@@ -76,62 +77,151 @@ LEGACY SCHEMA (from KB):
 DOMAIN MAP:
 {domain_map}
 
-SRS FUNCTIONAL REQUIREMENTS:
+SRS FUNCTIONAL REQUIREMENTS (your DDL must support EVERY one):
 {srs_functional}
 
-RULES:
-1. Apply 3NF normalisation.
-2. Every table: id UUID DEFAULT gen_random_uuid() PRIMARY KEY.
-3. All timestamps: TIMESTAMPTZ DEFAULT NOW().
-4. Soft deletes: deleted_at TIMESTAMPTZ NULL.
-5. Audit columns on every table: created_at, updated_at, created_by, updated_by.
-6. FK constraints with ON DELETE RESTRICT.
-7. Indexes on: all FKs, status columns, date columns.
-8. ENUM types for status fields.
-9. Comments on every table and complex columns.
-10. Group tables: -- ===== MODULE: User Management =====
-11. Minimum 80% of legacy tables represented.
-12. Be exhaustive — do not truncate output.
+═══════════════════════════════════════════════════════════════════
+COMPLETENESS CHECKLIST — DO NOT FINISH BEFORE TICKING EVERY ITEM
+═══════════════════════════════════════════════════════════════════
+□ Every entity mentioned in the SRS Functional section has a corresponding table.
+□ Every legacy table from the RAG context has been carried over (or explicitly
+  merged with a `-- MERGED FROM: old_table_x` comment).
+□ Every FK column declared with REFERENCES ... ON DELETE ...
+□ Every status / state column has its own ENUM TYPE.
+□ Every junction (M:N) table has a UNIQUE(a_id, b_id) constraint.
+□ Every monetary amount uses NUMERIC(18,4), never FLOAT or VARCHAR.
+□ Every email/url/code field has a CHECK constraint (regex or length).
 
-OUTPUT: Pure PostgreSQL DDL only.
-Start with: -- LAMA Generated OLTP Schema
-CREATE TYPE statements first, then CREATE TABLE grouped by module,
-then CREATE INDEX at end. No markdown, no explanation.""",
+═══════════════════════════════════════════════════════════════════
+HARD RULES
+═══════════════════════════════════════════════════════════════════
+1. Normalisation: 3NF strict. No repeating groups, no transitive deps.
+2. Every table:
+     id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     created_by    UUID REFERENCES users(id) ON DELETE SET NULL,
+     updated_by    UUID REFERENCES users(id) ON DELETE SET NULL,
+     deleted_at    TIMESTAMPTZ NULL
+3. Data types — be explicit:
+     - Money / quantity → NUMERIC(p,s) with explicit precision
+     - Booleans → BOOLEAN, never SMALLINT
+     - Dates → DATE, timestamps → TIMESTAMPTZ
+     - Long text → TEXT, short codes → VARCHAR(n)
+     - JSON payloads → JSONB (never JSON)
+     - IDs → UUID
+4. Foreign keys: ON DELETE RESTRICT (default) or CASCADE for child rows.
+   Always add an INDEX on every FK column.
+5. ENUM types for: order_status, payment_status, user_role, etc.
+   Declare BEFORE any CREATE TABLE that uses them.
+6. Indexes:
+     - btree on every FK column
+     - btree on every status/state column
+     - btree on every "queried by date" column (created_at, transaction_date, …)
+     - partial UNIQUE on `WHERE deleted_at IS NULL` for soft-delete uniqueness
+7. CHECK constraints: amount >= 0, percentage BETWEEN 0 AND 100, email regex,
+   non-empty TEXT NOT NULL columns.
+8. COMMENT ON TABLE / COMMENT ON COLUMN — every table and every non-obvious column.
+9. Group tables: -- ===== MODULE: <DomainName> =====
+10. SRS COVERAGE COMMENT: after each table add
+      -- COVERS: SRS-FR-XX, SRS-FR-YY  (cite the requirement IDs the table satisfies)
+
+OUTPUT (no markdown, no fences, no prose):
+-- LAMA Generated OLTP Schema
+-- Covers SRS functional requirements: <list FR ids>
+<CREATE EXTENSION statements: pgcrypto, citext>
+<CREATE TYPE …> (all enums)
+-- ===== MODULE: <ModuleName> =====
+<CREATE TABLE …>
+…
+-- ===== INDEXES =====
+<CREATE INDEX …>
+-- ===== VIEWS =====
+<CREATE VIEW …>  (helper views for common joins, optional)""",
     },
     {
         "key": "datamodel.olap",
         "stage": "DataModel",
         "description": "Generates a star-schema OLAP data warehouse DDL optimised for BI and NLP-to-SQL.",
         "force_update": True,
-        "template": """You are a senior data warehouse architect.
-Design a star schema optimised for BI, visualisation, and NLP-to-SQL.
+        "template": """You are a senior data warehouse architect designing a Kimball star schema.
+You will be HARSHLY PENALISED for snowflaked dimensions, fact tables without a
+date FK, measures stored as VARCHAR, or dimensions without surrogate keys.
 
 PROJECT: {project_name}
-OLTP SCHEMA:
+OLTP SCHEMA (source of truth):
 {oltp_ddl}
 
-SRS REQUIREMENTS:
+SRS REQUIREMENTS (analytical questions to answer):
 {srs_functional}
 
-BUS MATRIX:
+BUS MATRIX (facts × dimensions plan):
 {bus_matrix}
 
-RULES:
-1. Star schema: fact_ and dim_ tables only.
-2. Always include dim_date: date_key INT PK, full_date DATE,
-   day_of_week VARCHAR, week_number INT, month_name VARCHAR,
-   quarter INT, year INT, is_weekend BOOL, fiscal_year INT.
-3. Surrogate keys: INT GENERATED ALWAYS AS IDENTITY on dims.
-4. Fact tables: FKs to ALL relevant dimensions.
-5. Measure columns: pre-aggregated amounts, counts, durations.
-6. NLP-to-SQL: human-readable column names, no abbreviations,
-   COMMENT ON COLUMN for every measure with unit.
-7. fact tables: PARTITION BY RANGE (date_key).
-8. Add 5 materialised views for the most common BI queries.
+═══════════════════════════════════════════════════════════════════
+COMPLETENESS CHECKLIST
+═══════════════════════════════════════════════════════════════════
+□ For every fact in the bus matrix → one fact_ table.
+□ For every dim in the bus matrix → one dim_ table.
+□ Every fact has FKs to dim_date AND every applicable dim_ (no orphaned facts).
+□ Every dimension has a stated grain in `COMMENT ON TABLE`.
+□ Every fact has a stated grain in `COMMENT ON TABLE` (e.g. "one row per
+  order_line per day per store").
+□ Every numeric measure has explicit PRECISION + SCALE + unit comment.
 
-OUTPUT: Pure PostgreSQL DDL only.
-Start with: -- LAMA Generated OLAP Schema (Star Schema)
-Sections: -- DIMENSIONS, -- FACTS, -- MATERIALISED VIEWS""",
+═══════════════════════════════════════════════════════════════════
+HARD RULES
+═══════════════════════════════════════════════════════════════════
+1. STAR SCHEMA strict — NO snowflaking. Flatten hierarchies into dimension
+   attributes (e.g. dim_product.category_name not dim_category.name).
+2. Dimensions:
+     <dim>_key  INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+     <natural_key> ...
+     SCD Type-2 columns where history matters:
+       valid_from DATE, valid_to DATE NULL, is_current BOOLEAN
+3. Facts:
+     <fact>_id    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+     <dim>_key    INT NOT NULL REFERENCES dim_<x>(<dim>_key),
+     date_key     INT NOT NULL REFERENCES dim_date(date_key),
+     <measures>   NUMERIC(p,s) NOT NULL DEFAULT 0,
+     loaded_at    TIMESTAMPTZ DEFAULT NOW()
+4. dim_date (mandatory, fully populated):
+     date_key INT PK, full_date DATE NOT NULL UNIQUE,
+     day_of_week VARCHAR(10), day_of_month INT, week_number INT,
+     month_number INT, month_name VARCHAR(10), quarter INT, year INT,
+     is_weekend BOOLEAN, is_holiday BOOLEAN, fiscal_year INT, fiscal_quarter INT
+5. NLP-to-SQL friendly:
+     - Column names in plain English (total_amount_inr, order_count, days_to_ship)
+     - COMMENT ON COLUMN with measurement unit ("INR", "count", "days")
+     - No cryptic abbreviations (use `customer_id` not `cstm_id`)
+6. Partitioning: every fact table PARTITION BY RANGE(date_key) by year.
+   Create at least 3 partitions (last year, current year, next year).
+7. Indexes:
+     - btree on every <dim>_key in fact tables (composite covers common joins)
+     - btree on date_key, customer_key, product_key composites where used
+     - BRIN index on loaded_at (cheap, time-series-friendly)
+8. Materialised views — produce 5 covering the most likely BI questions
+   from SRS. Each must:
+     - Be named mv_<question_slug>
+     - Have a comment describing the BI question it answers
+     - REFRESH MATERIALIZED VIEW CONCURRENTLY-compatible (UNIQUE index)
+9. Provide one `CREATE PROCEDURE refresh_olap_all()` that refreshes all MVs.
+
+OUTPUT (pure PostgreSQL DDL, no markdown):
+-- LAMA Generated OLAP Schema (Star, Kimball-style)
+-- Covers SRS analytical requirements: <list>
+-- ===== DIMENSIONS =====
+<CREATE TABLE dim_…> (dim_date first, then alphabetical)
+-- ===== FACTS =====
+<CREATE TABLE fact_… PARTITION BY RANGE(date_key)>
+<CREATE TABLE fact_…_y2024 PARTITION OF fact_… FOR VALUES FROM (20240101) TO (20250101)>
+-- ===== INDEXES =====
+<CREATE INDEX …>
+-- ===== MATERIALISED VIEWS =====
+<CREATE MATERIALIZED VIEW mv_… AS SELECT …>
+<CREATE UNIQUE INDEX ON mv_…>
+-- ===== REFRESH PROCEDURE =====
+<CREATE OR REPLACE PROCEDURE refresh_olap_all() AS …>""",
     },
     {
         "key": "datamodel.bus_matrix",
@@ -559,12 +649,13 @@ async def seed_prompts():
         if not existing:
             doc = {**p, "version": 1, "updated_at": now}
             await prompts.insert_one(doc)
-        elif force and existing.get("version", 1) <= 2:
-            # Replace stale prompts in place; keep version increment so users see the change.
-            await prompts.update_one(
-                {"key": p["key"]},
-                {"$set": {**p, "version": existing.get("version", 1) + 1, "updated_at": now}},
-            )
+        elif force:
+            # Replace in place if the stored template differs from the seed.
+            if (existing.get("template") or "") != p.get("template", ""):
+                await prompts.update_one(
+                    {"key": p["key"]},
+                    {"$set": {**p, "version": existing.get("version", 1) + 1, "updated_at": now}},
+                )
 
 
 async def seed_pilot_project():

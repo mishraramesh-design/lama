@@ -9,6 +9,7 @@ import DataModelPage from "@/pages/DataModel";
 import ArchitecturePage from "@/pages/Architecture";
 import CodeGenPage from "@/pages/CodeGen";
 import ConsolePage from "@/pages/Console";
+import OntologyStudioPage from "@/pages/OntologyStudio";
 import StagePlaceholderPage from "@/pages/StagePlaceholder";
 import PromptLibraryPage from "@/pages/PromptLibrary";
 import AuditLogPage from "@/pages/AuditLog";
@@ -36,6 +37,7 @@ function App() {
           <Route path="/living" element={<Shell><StagePlaceholderPage stage="Living" /></Shell>} />
           <Route path="/prompts" element={<Shell><PromptLibraryPage /></Shell>} />
           <Route path="/console" element={<Shell><ConsolePage /></Shell>} />
+          <Route path="/ontology-studio" element={<Shell><OntologyStudioPage /></Shell>} />
           <Route path="/settings" element={<Shell><GitHubSettingsPage /></Shell>} />
           <Route path="/audit" element={<Shell><AuditLogPage /></Shell>} />
         </Routes>
