@@ -157,3 +157,24 @@ Full-stack legacy application migration assistant. FastAPI backend + React front
 - **Stage 3 — Architecture**: microservice decomposition.
 - **Stage 4 — CodeGen**: full target backend/frontend + Dockerfile; full GitHub push.
 - **Stage 5 — Living**: Selenium tests, SRS diffs, monitoring.
+
+
+## Iteration 12 (Feb 2026) — SRS Empty-Sections + Ontology Studio fixes
+- ✅ **SRS empty sections (P0)** — Root cause: `model_providers` collection contained 2 active providers with fake API keys (`sk-or-fake…`). `fabric_call` detected active providers and routed all LLM calls through them, getting `401 Unauthorized` from OpenRouter, which raised RuntimeError. Some `_gen_one_section` calls returned the failure marker, others returned empty depending on per-call timing/retries.
+  - Fix in `/app/backend/llm.py`: `fabric_call` now falls back to env-var OpenRouter when fabric returns empty content OR raises an exception (was previously: only fell back when fabric was *unconfigured*).
+  - Fix in `/app/backend/routes/srs.py` `_gen_one_section`:
+    - Added 1-retry on empty/parse failure with a directive re-prompt.
+    - Added fallback to CLASSES + TABLES TOON slice when the configured `toon_focus` (e.g. `INDIVIDUALS`) doesn't exist in the TOON output.
+    - Strengthened prompt to forbid empty/refusal responses.
+  - Verified: ran full `/api/srs/generate` against `1376022c…` (TEST_LAMA_v4_bb4ae283, PHP). All 9 sections now populated: definitions=3536, overall_description=4767, functional_requirements=8538, non_functional_requirements=3226, use_cases=7867, constraints=2994, entity_model=4987. `version=1` persisted.
+- ✅ **Ontology Studio broken on large projects** — Root cause: O(N²) Fruchterman-Reingold force layout in `OntologyStudio.jsx` froze the browser on graphs with >1000 nodes (e.g. 4411-node Java project).
+  - `forceLayout()` now auto-scales iterations: 60 (≤200 nodes) → 40 → 24 → 12 (>800 nodes).
+  - `GraphView` enforces `MAX_GRAPH_NODES=500`, keeps the most-connected ones plus the currently-selected node when capped, and shows an amber banner explaining the cap.
+  - `OntologyStudioPage` auto-removes `Method` and `Column` from default visible types when total nodes >800 (they otherwise dominate Java/JSP projects).
+  - Verified via Playwright: 4411-node project now renders cleanly with 44 visible class nodes.
+
+## Backlog (post-iter-12)
+- **P1** Continue OLTP / OLAP data-model generation quality refinement.
+- **P2** Verify GitHub un-stub path for Stage 4 CodeGen push end-to-end on a Hostinger VPS pull.
+- **P2** UI: add an "Auth health" pill in the Console showing whether the active provider's API key is actually working (avoids silent 401 chains).
+- **P2** Add a backend `/api/console/providers/validate/{id}` endpoint that does a 1-message ping to confirm provider key validity before saving it as default.

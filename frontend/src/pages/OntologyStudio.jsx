@@ -40,10 +40,16 @@ const EDGE_KIND_COLORS = {
 
 // ────────────────────────────────────────────────────────────────────
 // Force-directed layout (Fruchterman-Reingold, ~30 iterations)
+// Caps the iteration count and per-iteration work so large graphs stay responsive.
 // ────────────────────────────────────────────────────────────────────
 function forceLayout(nodes, edges, { width = 1400, height = 900, iter = 60 } = {}) {
   if (!nodes.length) return [];
-  const k = Math.sqrt((width * height) / nodes.length) * 0.7;
+  // Auto-reduce iterations for large graphs (>400 nodes) — O(N²) per iteration.
+  const N = nodes.length;
+  if (N > 800)       iter = 12;
+  else if (N > 400)  iter = 24;
+  else if (N > 200)  iter = 40;
+  const k = Math.sqrt((width * height) / N) * 0.7;
   const positioned = nodes.map((n, i) => ({
     ...n,
     x: width / 2 + (Math.random() - 0.5) * width * 0.6,
@@ -55,8 +61,8 @@ function forceLayout(nodes, edges, { width = 1400, height = 900, iter = 60 } = {
   for (let step = 0; step < iter; step++) {
     // Repulsion
     for (const a of positioned) { a.dx = 0; a.dy = 0; }
-    for (let i = 0; i < positioned.length; i++) {
-      for (let j = i + 1; j < positioned.length; j++) {
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
         const a = positioned[i], b = positioned[j];
         const dx = a.x - b.x, dy = a.y - b.y;
         const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
@@ -98,10 +104,34 @@ function GraphView({ nodes, edges, selectedTypes, search, onSelect, selected }) 
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const dragRef = useRef(null);
 
-  const filteredNodes = useMemo(() => nodes.filter((n) =>
+  // Hard cap on rendered nodes — anything beyond freezes the browser on the O(N²) layout.
+  const MAX_GRAPH_NODES = 500;
+
+  const filteredNodesRaw = useMemo(() => nodes.filter((n) =>
     selectedTypes.has(n.type) &&
     (!search || (n.label || "").toLowerCase().includes(search.toLowerCase()))
   ), [nodes, selectedTypes, search]);
+
+  // If too many nodes after filtering, keep the most-connected ones and the selected node.
+  const filteredNodes = useMemo(() => {
+    if (filteredNodesRaw.length <= MAX_GRAPH_NODES) return filteredNodesRaw;
+    const degree = {};
+    for (const e of edges) {
+      degree[e.source] = (degree[e.source] || 0) + 1;
+      degree[e.target] = (degree[e.target] || 0) + 1;
+    }
+    const ranked = [...filteredNodesRaw].sort(
+      (a, b) => (degree[b.id] || 0) - (degree[a.id] || 0)
+    );
+    const out = ranked.slice(0, MAX_GRAPH_NODES);
+    if (selected && !out.find((n) => n.id === selected)) {
+      const sel = filteredNodesRaw.find((n) => n.id === selected);
+      if (sel) out.push(sel);
+    }
+    return out;
+  }, [filteredNodesRaw, edges, selected]);
+
+  const isCapped = filteredNodesRaw.length > MAX_GRAPH_NODES;
   const visibleIds = useMemo(() => new Set(filteredNodes.map((n) => n.id)), [filteredNodes]);
   const filteredEdges = useMemo(() => edges.filter((e) =>
     visibleIds.has(e.source) && visibleIds.has(e.target)
@@ -152,6 +182,11 @@ function GraphView({ nodes, edges, selectedTypes, search, onSelect, selected }) 
       </div>
       <div className="absolute bottom-3 left-3 z-10 bg-white border border-[#E6E6E6] rounded-sm px-2 py-1 text-[10px] text-[#747480]" data-testid="graph-stats">
         {positioned.length} nodes · {filteredEdges.length} edges · zoom {Math.round(view.scale * 100)}%
+        {isCapped && (
+          <span className="ml-2 text-amber-700 font-bold">
+            (capped from {filteredNodesRaw.length} — toggle off types to see more)
+          </span>
+        )}
       </div>
       <svg
         ref={svgRef}
@@ -348,6 +383,22 @@ export default function OntologyStudioPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [selectedTypes, setSelectedTypes] = useState(new Set(Object.keys(TYPE_META)));
   const [search, setSearch] = useState("");
+
+  // Auto-trim Method/Column from the default visible set on huge graphs (>800 nodes)
+  // — they explode node counts on Java/JSP projects and freeze the browser.
+  const autoTrimmedRef = useRef(false);
+  useEffect(() => {
+    if (autoTrimmedRef.current) return;
+    if ((data.stats?.total_nodes || 0) > 800) {
+      autoTrimmedRef.current = true;
+      setSelectedTypes((prev) => {
+        const next = new Set(prev);
+        next.delete("Method");
+        next.delete("Column");
+        return next;
+      });
+    }
+  }, [data.stats?.total_nodes]);
 
   // Snapshots & diff
   const [snapshots, setSnapshots] = useState([]);

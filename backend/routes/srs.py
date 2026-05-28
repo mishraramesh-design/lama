@@ -296,6 +296,13 @@ async def _gen_one_section(cfg: dict, proj: dict, full_toon: str, summary: str, 
 
     # Structural skeleton (smaller now since RAG fills in the specifics)
     toon_slice = extract_toon_section(full_toon, cfg["toon_focus"], 4000)
+    # Fallback: if the requested focus is missing (e.g. INDIVIDUALS isn't in TOON),
+    # use CLASSES + TABLES so the LLM always has structural context to ground on.
+    if not toon_slice.strip():
+        toon_slice = "\n".join([
+            extract_toon_section(full_toon, "CLASSES", 6000),
+            extract_toon_section(full_toon, "TABLES", 6000),
+        ]).strip() or full_toon[:8000]
 
     # Semantic RAG: top-15 relevant code/schema chunks for this section
     rag_chunks: list[str] = []
@@ -309,7 +316,7 @@ async def _gen_one_section(cfg: dict, proj: dict, full_toon: str, summary: str, 
 
     # If no RAG available, keep TOON slice large
     if not rag_context:
-        toon_slice = extract_toon_section(full_toon, cfg["toon_focus"], 15000)
+        toon_slice = extract_toon_section(full_toon, cfg["toon_focus"], 15000) or toon_slice
 
     kb_block = (
         f"STRUCTURAL SKELETON (TOON — {cfg['toon_focus']}):\n{toon_slice}"
@@ -347,6 +354,8 @@ RULES:
 - Format: markdown with sub-headings, bullet lists, tables where appropriate.
 - Write as if a developer with zero prior knowledge must implement from scratch.
 - Do NOT summarise. Be exhaustive and specific.
+- Do NOT refuse, do NOT ask follow-up questions, do NOT output an empty response.
+  If the KB seems thin, infer best-practice content from the SOURCE STACK and what classes/tables ARE visible.
 
 Return only the markdown content. No JSON. No preamble."""
 
@@ -355,29 +364,44 @@ Return only the markdown content. No JSON. No preamble."""
         {"role": "user", "content": f"Write the {cfg['label']} section now. Be detailed and exhaustive."},
     ]
 
-    try:
-        result = await chat_completion(
-            messages=llm_msgs,
-            model=model,
-            temperature=0.2,
-            max_tokens=max_tokens,
-            timeout=240.0,
-        )
-        content = (result["content"] or "").strip()
-        # Some models wrap the response in ```markdown … ``` despite the rules.
-        if content.startswith("```"):
-            content = content[3:]
-            if content[:8].lower().startswith("markdown"):
-                content = content[8:]
-            content = content.lstrip("\n")
-            if content.endswith("```"):
-                content = content[:-3].rstrip()
-        return {
-            "content": content,
-            "tokens": result["usage"].get("total_tokens", 0),
-        }
-    except Exception as e:
-        return {"content": f"_[Section generation failed: {e}]_", "tokens": 0}
+    last_err: str = ""
+    for attempt in range(2):  # 1 retry on empty/parse failure
+        try:
+            result = await chat_completion(
+                messages=llm_msgs,
+                model=model,
+                temperature=0.2 if attempt == 0 else 0.4,
+                max_tokens=max_tokens,
+                timeout=240.0,
+            )
+            content = (result["content"] or "").strip()
+            # Some models wrap the response in ```markdown … ``` despite the rules.
+            if content.startswith("```"):
+                content = content[3:]
+                if content[:8].lower().startswith("markdown"):
+                    content = content[8:]
+                content = content.lstrip("\n")
+                if content.endswith("```"):
+                    content = content[:-3].rstrip()
+            if content.strip():
+                return {
+                    "content": content,
+                    "tokens": result["usage"].get("total_tokens", 0),
+                }
+            # Empty output — retry once with a more directive nudge.
+            last_err = "LLM returned empty content"
+            llm_msgs = [
+                llm_msgs[0],
+                {"role": "user", "content": (
+                    f"You returned an empty response. Write the {cfg['label']} section now — "
+                    "at least 8 paragraphs, real names from the KB above, no refusals."
+                )},
+            ]
+        except Exception as e:
+            last_err = str(e)[:240]
+            if attempt == 0:
+                continue
+    return {"content": f"_[Section generation failed: {last_err}]_", "tokens": 0}
 
 
 async def _load_srs_context(project_id: str, conversation_id: str | None):

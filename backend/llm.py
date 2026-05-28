@@ -91,22 +91,35 @@ async def fabric_call(
             }.get(mod, "unknown")
         except Exception:
             agent_key = "unknown"
+    fabric_err: Exception | None = None
     try:
         from db import model_providers as mp_col
         has_providers = await mp_col.count_documents({"is_active": True}) > 0
         if has_providers:
             from fabric.model_fabric import fabric_chat
-            return await fabric_chat(
-                messages=messages,
-                agent_key=agent_key,
-                project_id=project_id,
-                model_override=kwargs.get("model_override", "") or kwargs.get("model", ""),
-                max_tokens=kwargs.get("max_tokens", 0) or 0,
-                temperature=kwargs.get("temperature", 0.3),
-                timeout=kwargs.get("timeout", 120.0),
-            )
-    except Exception:
-        pass
+            try:
+                result = await fabric_chat(
+                    messages=messages,
+                    agent_key=agent_key,
+                    project_id=project_id,
+                    model_override=kwargs.get("model_override", "") or kwargs.get("model", ""),
+                    max_tokens=kwargs.get("max_tokens", 0) or 0,
+                    temperature=kwargs.get("temperature", 0.3),
+                    timeout=kwargs.get("timeout", 120.0),
+                )
+                # If fabric returned empty content (e.g., upstream returned 200 with no text)
+                # and we have an OpenRouter fallback configured, retry via legacy client.
+                if (result.get("content") or "").strip() or not OPENROUTER_API_KEY:
+                    return result
+                fabric_err = RuntimeError("fabric returned empty content")
+            except Exception as e:
+                fabric_err = e
+    except Exception as e:
+        fabric_err = e
+
+    # Fallback to env-var OpenRouter if fabric is not configured or fails.
+    if fabric_err is not None and not OPENROUTER_API_KEY:
+        raise fabric_err
     model = kwargs.get("model_override") or kwargs.get("model", "deepseek/deepseek-chat")
     return await chat_completion(
         messages=messages, model=model,
