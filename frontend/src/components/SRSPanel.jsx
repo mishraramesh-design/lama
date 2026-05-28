@@ -418,6 +418,12 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
                       const matches = [];
                       let m;
                       while ((m = re.exec(rawBuf)) !== null) matches.push({ key: m[1], start: m.index, end: m.index + m[0].length });
+                      if (matches.length === 0) {
+                        toast.error("No <!-- SECTION:key --> markers found. Refusing to save — please keep the markers so we can split the document back into the 9 IEEE-830 sections.");
+                        setSavingRaw(false);
+                        return;
+                      }
+                      const validKeys = new Set(SECTIONS.map((s) => s.key));
                       const blocks = {};
                       for (let i = 0; i < matches.length; i++) {
                         const next = matches[i + 1];
@@ -425,10 +431,16 @@ export default function SRSPanel({ projectId, conversationId, kbReady, onFrozen,
                         // Strip the leading "## Heading" line that follows the marker
                         blocks[matches[i].key] = body.replace(/^\s*##[^\n]*\n+/, "").trim();
                       }
+                      const unknown = Object.keys(blocks).filter((k) => !validKeys.has(k));
+                      if (unknown.length > 0) {
+                        toast.error(`Unknown section key(s): ${unknown.join(", ")}. Valid keys are: ${[...validKeys].join(", ")}.`);
+                        setSavingRaw(false);
+                        return;
+                      }
                       let saved = 0;
                       for (const s of SECTIONS) {
-                        const content = blocks[s.key] ?? "";
-                        await updateSRSSection(projectId, s.key, content);
+                        if (!(s.key in blocks)) continue; // don't wipe sections the user didn't include
+                        await updateSRSSection(projectId, s.key, blocks[s.key]);
                         saved += 1;
                       }
                       toast.success(`Saved ${saved} section(s)`);

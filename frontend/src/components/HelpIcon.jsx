@@ -11,14 +11,15 @@ export default function HelpIcon({ text, side = "top", testId }) {
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
+          <span
+            role="button"
+            tabIndex={0}
             data-testid={testId || "help-icon"}
-            className="inline-flex items-center justify-center w-4 h-4 ml-1 text-slate-400 hover:text-slate-700"
+            className="inline-flex items-center justify-center w-4 h-4 ml-1 text-slate-400 hover:text-slate-700 cursor-help"
             aria-label="Help"
           >
             <HelpCircle className="w-4 h-4" />
-          </button>
+          </span>
         </TooltipTrigger>
         <TooltipContent side={side} className="max-w-xs text-xs leading-relaxed">
           {text}
