@@ -38,8 +38,8 @@ function paletteForDomains(domains) {
 // curved lines, intra-domain edges stay short. Far more readable than a
 // raw force layout on small graphs.
 // ────────────────────────────────────────────────────────────────────
-const W = 2400;
-const H = 1600;
+const W = 2800;
+const H = 1900;
 
 function clusteredLayout(entities, relationships, domains) {
   if (!entities.length) return { nodes: [], domainPositions: {} };
@@ -53,18 +53,21 @@ function clusteredLayout(entities, relationships, domains) {
   const usedDomains = domains.filter((d) => buckets[d] && buckets[d].length > 0);
   const D = usedDomains.length || 1;
 
-  // Cluster radii based on member counts.
+  // Cluster radii based on member counts (sized for larger cards).
   const clusterRadius = {};
   for (const d of usedDomains) {
     const n = buckets[d].length;
-    if (n === 1)      clusterRadius[d] = 60;
-    else if (n <= 4)  clusterRadius[d] = 150;
-    else if (n <= 8)  clusterRadius[d] = 230;
-    else              clusterRadius[d] = 310;
+    if (n === 1)      clusterRadius[d] = 100;
+    else if (n === 2) clusterRadius[d] = 180;
+    else if (n <= 4)  clusterRadius[d] = 230;
+    else if (n <= 8)  clusterRadius[d] = 310;
+    else              clusterRadius[d] = 400;
   }
-  // Outer ring big enough that the biggest two halos can't touch each other.
+  // Outer ring big enough that the biggest two halos can't touch each other
+  // but small enough that all clusters stay inside the viewBox.
   const maxR = Math.max(...Object.values(clusterRadius), 120);
-  const ringR = Math.max(W, H) * 0.36 + maxR * 0.25;
+  const halfMin = Math.min(W, H) / 2;
+  const ringR = Math.max(0, halfMin - maxR - 110);
   const cx = W / 2;
   const cy = H / 2;
 
@@ -97,10 +100,10 @@ function clusteredLayout(entities, relationships, domains) {
     if (n === 1) {
       placed.push({ ...list[0], x: pos.cx, y: pos.cy });
     } else if (n === 2) {
-      placed.push({ ...list[0], x: pos.cx - 90, y: pos.cy });
-      placed.push({ ...list[1], x: pos.cx + 90, y: pos.cy });
+      placed.push({ ...list[0], x: pos.cx - 130, y: pos.cy });
+      placed.push({ ...list[1], x: pos.cx + 130, y: pos.cy });
     } else {
-      const r = pos.r - 30;
+      const r = pos.r - 40;
       list.forEach((e, i) => {
         const a = (2 * Math.PI * i) / n - Math.PI / 2;
         placed.push({ ...e, x: pos.cx + r * Math.cos(a), y: pos.cy + r * Math.sin(a) });
@@ -175,11 +178,12 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
     dragRef.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
   };
   const onMouseMove = (e) => {
-    if (!dragRef.current) return;
+    const drag = dragRef.current;
+    if (!drag) return;
     setView((v) => ({
       ...v,
-      tx: dragRef.current.tx + (e.clientX - dragRef.current.x),
-      ty: dragRef.current.ty + (e.clientY - dragRef.current.y),
+      tx: drag.tx + (e.clientX - drag.x),
+      ty: drag.ty + (e.clientY - drag.y),
     }));
   };
   const onMouseUp = () => { dragRef.current = null; };
@@ -232,24 +236,24 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
           {Object.entries(domainPositions).map(([dom, pos]) => {
             const meta = palette[dom] || DOMAIN_PALETTE[0];
             const memberCount = positioned.filter((n) => n.domain === dom).length;
-            const r = pos.r + 40;
+            const r = pos.r + 50;
             return (
               <g key={`halo-${dom}`}>
                 <circle cx={pos.cx} cy={pos.cy} r={r}
                   fill={meta.bg} fillOpacity={0.45}
                   stroke={meta.border} strokeOpacity={0.5}
-                  strokeDasharray="6 5" strokeWidth={1.3} />
-                <rect x={pos.cx - 110} y={pos.cy - r - 32}
-                  width={220} height={26} rx={13} ry={13}
+                  strokeDasharray="6 5" strokeWidth={1.5} />
+                <rect x={pos.cx - 150} y={pos.cy - r - 44}
+                  width={300} height={36} rx={18} ry={18}
                   fill={meta.border} />
-                <text x={pos.cx} y={pos.cy - r - 14}
-                  textAnchor="middle" fontSize={14} fontWeight={800}
+                <text x={pos.cx} y={pos.cy - r - 20}
+                  textAnchor="middle" fontSize={18} fontWeight={800}
                   fill="white" style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}>
                   {dom}
                 </text>
-                <text x={pos.cx} y={pos.cy - r + 2}
-                  textAnchor="middle" fontSize={11} fontWeight={600}
-                  fill={meta.color} opacity={0.75}>
+                <text x={pos.cx} y={pos.cy - r + 8}
+                  textAnchor="middle" fontSize={14} fontWeight={700}
+                  fill={meta.color} opacity={0.85}>
                   {memberCount} {memberCount === 1 ? "entity" : "entities"}
                 </text>
               </g>
@@ -274,11 +278,11 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
                   markerEnd={isFk ? "url(#biz-arrow-fk)" : "url(#biz-arrow)"} />
                 {r.verb && (
                   <g>
-                    <rect x={lx - r.verb.length * 3.5 - 4} y={ly - 9} rx={3} ry={3}
-                      width={r.verb.length * 7 + 8} height={16}
-                      fill="white" stroke={isFk ? "#E6E6E6" : "#D1D5DB"} strokeWidth={0.8} />
-                    <text x={lx} y={ly + 2.5} textAnchor="middle"
-                      fontSize={10} fontWeight={600}
+                    <rect x={lx - r.verb.length * 4.5 - 6} y={ly - 12} rx={4} ry={4}
+                      width={r.verb.length * 9 + 12} height={22}
+                      fill="white" stroke={isFk ? "#E6E6E6" : "#D1D5DB"} strokeWidth={1} />
+                    <text x={lx} y={ly + 4} textAnchor="middle"
+                      fontSize={13} fontWeight={700}
                       fill={isFk ? "#6B7280" : "#2E2E38"}
                       style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
                       {r.verb}
@@ -292,8 +296,8 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
           {/* Entity cards */}
           {positioned.map((n) => {
             const meta = palette[n.domain] || DOMAIN_PALETTE[0];
-            const w = Math.max(140, Math.min(220, (n.name || "").length * 9 + 36));
-            const h = 52;
+            const w = Math.max(180, Math.min(280, (n.name || "").length * 12 + 48));
+            const h = 68;
             const focused = isFocused(n.id);
             const isSel = n.id === selected;
             const tblCount = (n.backed_by_tables || []).length;
@@ -307,23 +311,23 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
                  opacity={focused ? 1 : 0.22}>
                 {/* Card shadow */}
                 <rect x={n.x - w / 2} y={n.y - h / 2}
-                  rx={10} ry={10} width={w} height={h}
+                  rx={12} ry={12} width={w} height={h}
                   fill="white"
                   stroke={isSel ? meta.border : "#E6E6E6"}
-                  strokeWidth={isSel ? 3 : 1.2}
+                  strokeWidth={isSel ? 4 : 1.4}
                   filter="url(#card-shadow)" />
                 {/* Left color stripe */}
                 <rect x={n.x - w / 2} y={n.y - h / 2}
-                  width={6} height={h} rx={3} ry={3}
+                  width={8} height={h} rx={4} ry={4}
                   fill={meta.border} />
                 {/* Name */}
-                <text x={n.x - w / 2 + 14} y={n.y - 4}
-                  fontSize={13} fontWeight={700} fill="#2E2E38">
-                  {(n.name || "").length > 18 ? (n.name || "").slice(0, 18) + "…" : n.name}
+                <text x={n.x - w / 2 + 18} y={n.y - 4}
+                  fontSize={17} fontWeight={700} fill="#2E2E38">
+                  {(n.name || "").length > 20 ? (n.name || "").slice(0, 20) + "…" : n.name}
                 </text>
                 {/* Stats row */}
-                <text x={n.x - w / 2 + 14} y={n.y + 14}
-                  fontSize={9.5} fill="#747480"
+                <text x={n.x - w / 2 + 18} y={n.y + 18}
+                  fontSize={12} fontWeight={500} fill="#747480"
                   style={{ letterSpacing: "0.02em" }}>
                   {tblCount > 0 && <tspan>{tblCount} table{tblCount !== 1 ? "s" : ""}</tspan>}
                   {tblCount > 0 && clsCount > 0 && <tspan>  ·  </tspan>}
