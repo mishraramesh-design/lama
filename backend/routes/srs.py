@@ -172,9 +172,14 @@ Write at minimum one use case per major controller group found.""",
 
 
 async def _gen_entity_model(project_id: str) -> dict:
-    """Compute ER diagram data deterministically from kb_entities (no LLM)."""
+    """Compute ER diagram data deterministically from kb_entities (no LLM).
+    Also augments edges by parsing FK statements from the generated OLTP DDL
+    so the ER works for legacy schemas where the raw SQL dump has no explicit
+    REFERENCES (common in MySQL <5.6 MyISAM and most older PHP apps)."""
     import math
+    import re as _re
     from collections import defaultdict as _defaultdict
+    from db import data_models as _data_models
 
     entities = await kb_entities.find(
         {"project_id": project_id, "type": "TABLE"}, {"_id": 0}
@@ -219,6 +224,95 @@ async def _gen_entity_model(project_id: str) -> dict:
                     "type":        "fk",
                     "cardinality": "many-to-one",
                 })
+
+    # --- Augmentation 1: parse FK statements from generated OLTP DDL ---
+    oltp_art = await _data_models.find_one({"project_id": project_id, "type": "oltp_ddl"}, {"_id": 0})
+    ddl = (oltp_art or {}).get("content", "") or ""
+    if ddl:
+        table_names = {n["id"].lower(): n["id"] for n in nodes}
+        # Inline: REFERENCES "other" ("id")  or REFERENCES other(id)
+        # Standalone: FOREIGN KEY ("a") REFERENCES "other" ("id")
+        # Iterate per CREATE TABLE block so we know the *source* table.
+        block_re = _re.compile(
+            r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[\"`']?([A-Za-z0-9_\.]+)[\"`']?\s*\((.*?)\)\s*;",
+            _re.IGNORECASE | _re.DOTALL,
+        )
+        fk_re = _re.compile(
+            r"FOREIGN\s+KEY\s*\(\s*[\"`']?([A-Za-z0-9_]+)[\"`']?\s*\)\s*"
+            r"REFERENCES\s+[\"`']?([A-Za-z0-9_\.]+)[\"`']?\s*\(\s*[\"`']?([A-Za-z0-9_]+)[\"`']?\s*\)",
+            _re.IGNORECASE,
+        )
+        inline_re = _re.compile(
+            r"[\"`']?([A-Za-z0-9_]+)[\"`']?\s+[A-Za-z][A-Za-z0-9_()\s,]*?\s+REFERENCES\s+"
+            r"[\"`']?([A-Za-z0-9_\.]+)[\"`']?\s*\(\s*[\"`']?([A-Za-z0-9_]+)[\"`']?\s*\)",
+            _re.IGNORECASE,
+        )
+        for m in block_re.finditer(ddl):
+            src_table_raw = m.group(1).split(".")[-1]
+            body = m.group(2)
+            src_table = table_names.get(src_table_raw.lower(), src_table_raw)
+            for fm in fk_re.finditer(body):
+                from_col, to_table_raw, to_col = fm.group(1), fm.group(2).split(".")[-1], fm.group(3)
+                to_table = table_names.get(to_table_raw.lower(), to_table_raw)
+                key = f"{src_table}.{from_col}->{to_table}"
+                if key in edge_set:
+                    continue
+                edge_set.add(key)
+                edges.append({
+                    "id": key, "from_table": src_table, "from_col": from_col,
+                    "to_table": to_table, "to_col": to_col, "type": "fk",
+                    "cardinality": "many-to-one", "source": "oltp_ddl",
+                })
+            for fm in inline_re.finditer(body):
+                # Skip if the keyword token itself was "FOREIGN" (already matched above)
+                if fm.group(1).lower() == "key":
+                    continue
+                from_col, to_table_raw, to_col = fm.group(1), fm.group(2).split(".")[-1], fm.group(3)
+                to_table = table_names.get(to_table_raw.lower(), to_table_raw)
+                key = f"{src_table}.{from_col}->{to_table}"
+                if key in edge_set:
+                    continue
+                edge_set.add(key)
+                edges.append({
+                    "id": key, "from_table": src_table, "from_col": from_col,
+                    "to_table": to_table, "to_col": to_col, "type": "fk",
+                    "cardinality": "many-to-one", "source": "oltp_ddl",
+                })
+
+    # --- Augmentation 2: heuristic inference when neither KB nor OLTP has FKs ---
+    # If a table has column "X_id" / "Xid" / "fk_X" and another table named X (or Xs) exists,
+    # treat it as a many-to-one relationship. Common in legacy PHP MySQL dumps.
+    if not edges:
+        name_to_id = {n["id"].lower(): n["id"] for n in nodes}
+        # Try both "users" -> "user" and "user" -> "users" matches.
+        def _resolve_target(raw):
+            cand = raw.lower()
+            for c in (cand, cand + "s", cand[:-1] if cand.endswith("s") else cand + "es",
+                      "tbl_" + cand, cand.rstrip("s")):
+                if c in name_to_id and c != "id":
+                    return name_to_id[c]
+            return None
+
+        for n in nodes:
+            for col in n["columns"]:
+                cn = col["name"].lower()
+                ref = None
+                if cn.endswith("_id") and cn != "id":
+                    ref = _resolve_target(cn[:-3])
+                elif cn.endswith("id") and len(cn) > 3:
+                    ref = _resolve_target(cn[:-2])
+                if ref and ref != n["id"]:
+                    key = f"{n['id']}.{col['name']}->{ref}"
+                    if key in edge_set:
+                        continue
+                    edge_set.add(key)
+                    col["is_fk"] = True
+                    n["fk_count"] += 1
+                    edges.append({
+                        "id": key, "from_table": n["id"], "from_col": col["name"],
+                        "to_table": ref, "type": "fk", "cardinality": "many-to-one",
+                        "source": "inferred",
+                    })
 
     # Domain-clustered layout
     domain_groups = _defaultdict(list)

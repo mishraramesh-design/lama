@@ -344,6 +344,219 @@ async def _run_scripts_job(job_id: str, project_id: str, model: str):
         _job_finish(job_id, "error", error=str(e))
 
 
+async def _run_oltp_job(job_id: str, project_id: str, model: str):
+    """Background OLTP DDL generation. Mirrors generate_oltp but updates _JOBS instead of yielding SSE."""
+    import time as _time
+    try:
+        _job_update(job_id, status="running", step="Loading context…", pct=5)
+        discovery_ctx = await require_stage_context(project_id, "Discovery", "DataModel")
+        proj = await projects.find_one({"id": project_id}, {"_id": 0})
+        if not proj:
+            _job_finish(job_id, "error", error="Project not found")
+            return
+
+        srs_functional = (discovery_ctx.get("outputs", {}).get("srs_sections", {}) or {}).get("functional_requirements", "")[:8000]
+        domain_map = discovery_ctx.get("outputs", {}).get("domain_map", {})
+        data_hints = discovery_ctx.get("outputs", {}).get("data_model_hints", {})
+        domain_map_str = json.dumps(
+            {k: {"tables": (v or {}).get("tables", [])[:15]} for k, v in (domain_map or {}).items()}
+        )[:4000]
+
+        _job_update(job_id, step="Retrieving KB chunks…", pct=15)
+        try:
+            rag_chunks = await qdrant_search(project_id, "database tables relationships foreign keys constraints", top_k=20)
+        except Exception:
+            rag_chunks = []
+        rag_context = "\n\n---\n\n".join(rag_chunks)[:12000] if rag_chunks else (discovery_ctx.get("toon_summary") or "")[:12000]
+
+        n_tables = data_hints.get("domains") and sum(len(d.get("tables", [])) for d in (data_hints.get("domains") or {}).values())
+        if not n_tables:
+            n_tables = await kb_entities.count_documents({"project_id": project_id, "type": "TABLE"})
+
+        _job_update(job_id, step="Building prompt…", pct=22)
+        template = await _get_prompt(project_id, "datamodel.oltp")
+        if not template:
+            _job_finish(job_id, "error", error="datamodel.oltp prompt missing in seed.")
+            return
+
+        system_prompt = _safe_format(
+            template,
+            project_name=proj.get("name", ""),
+            source_tech=proj.get("source_tech", ""),
+            target_tech=proj.get("target_tech", ""),
+            rag_context=rag_context,
+            domain_map=domain_map_str,
+            srs_functional=srs_functional,
+        )
+
+        _job_update(job_id, step=f"Calling LLM on {n_tables} legacy tables (60–120s typical)…", pct=30)
+        gen_task = asyncio.create_task(
+            chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate the complete OLTP DDL now. Be exhaustive."},
+                ],
+                model=model,
+                temperature=0.15,
+                max_tokens=16000,
+                timeout=300.0,
+            )
+        )
+        started = _time.time()
+        while not gen_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(gen_task), timeout=3.0)
+            except asyncio.TimeoutError:
+                elapsed = int(_time.time() - started)
+                pct = min(88, 30 + int(58 * (1 - 1 / (1 + elapsed / 25))))
+                _job_update(job_id, step=f"LLM generating ({elapsed}s elapsed)…", pct=pct)
+            except Exception:
+                break
+
+        try:
+            result = await gen_task
+        except Exception as e:
+            _job_finish(job_id, "error", error=f"LLM call failed: {e}")
+            return
+
+        content = await _strip_md_fence(result.get("content", ""))
+        if not content.strip():
+            _job_finish(job_id, "error", error="LLM returned empty DDL.")
+            return
+
+        _job_update(job_id, step="Saving artifact…", pct=92)
+        tables_n = content.upper().count("CREATE TABLE")
+        fks_n = content.upper().count("REFERENCES ")
+
+        tracability = {
+            "discovery_version": discovery_ctx.get("version"),
+            "srs_sections_used": ["functional_requirements"],
+            "rag_chunks": len(rag_chunks),
+            "model": model,
+            "prompt_key": "datamodel.oltp",
+        }
+        art = await _save_artifact(project_id, "oltp_ddl", content, model, tracability)
+        await audit_log.insert_one({
+            "action": "datamodel.generate.oltp",
+            "project_id": project_id,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "details": {"version": art["version"], "tables": tables_n, "fks": fks_n, "model": model, "job_id": job_id},
+        })
+        _job_finish(
+            job_id,
+            "complete",
+            step="Done",
+            pct=100,
+            result={"artifact_id": art["id"], "version": art["version"], "tables": tables_n, "fks": fks_n},
+        )
+    except HTTPException as he:
+        _job_finish(job_id, "error", error=he.detail)
+    except Exception as e:
+        _job_finish(job_id, "error", error=str(e))
+
+
+@router.post("/{project_id}/bus-matrix/apply")
+async def apply_bus_matrix_change(project_id: str, payload: dict):
+    """Replace bus_matrix artifact with the supplied JSON (used by chat Apply button)."""
+    raw = (payload or {}).get("matrix") or (payload or {}).get("content") or ""
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            try:
+                s = raw.index("{")
+                e = raw.rindex("}")
+                parsed = json.loads(raw[s:e + 1])
+            except Exception as ex:
+                raise HTTPException(400, f"Invalid JSON: {ex}")
+    elif isinstance(raw, dict):
+        parsed = raw
+    else:
+        raise HTTPException(400, "matrix payload required")
+
+    existing = await data_models.find_one({"project_id": project_id, "type": "bus_matrix"}, {"_id": 0})
+    tracability = {
+        "source": "chat_apply",
+        "previous_version": (existing or {}).get("version"),
+    }
+    art = await _save_artifact(project_id, "bus_matrix",
+                               json.dumps(parsed, indent=2),
+                               (existing or {}).get("generated_by", "user-edit"),
+                               tracability)
+    await audit_log.insert_one({
+        "action": "datamodel.bus_matrix.apply",
+        "project_id": project_id,
+        "at": datetime.now(timezone.utc).isoformat(),
+        "details": {"version": art["version"], "facts": len(parsed.get("facts", []) or []),
+                    "dims": len(parsed.get("dimensions", []) or [])},
+    })
+    return {"ok": True, "artifact_id": art["id"], "version": art["version"], "matrix": parsed}
+
+
+@router.post("/{project_id}/er/apply")
+async def apply_er_change(project_id: str, payload: dict):
+    """Apply an ER patch (add_edges / remove_edges) directly to kb_entities.fks so the
+    deterministic ER builder picks them up immediately."""
+    raw = (payload or {}).get("patch") or (payload or {}).get("content") or {}
+    if isinstance(raw, str):
+        try:
+            patch = json.loads(raw)
+        except Exception as e:
+            raise HTTPException(400, f"Invalid JSON patch: {e}")
+    else:
+        patch = raw or {}
+
+    add = patch.get("add_edges") or []
+    remove = patch.get("remove_edges") or []
+    added = 0
+    removed = 0
+    for edge in add:
+        src = edge.get("from_table")
+        col = edge.get("from_col")
+        ref = edge.get("to_table")
+        ref_col = edge.get("to_col") or "id"
+        if not (src and col and ref):
+            continue
+        await kb_entities.update_one(
+            {"project_id": project_id, "name": src, "type": "TABLE"},
+            {"$addToSet": {"fks": {"column": col, "ref_table": ref, "ref_column": ref_col}}},
+        )
+        added += 1
+    for edge in remove:
+        src = edge.get("from_table")
+        col = edge.get("from_col")
+        ref = edge.get("to_table")
+        if not (src and col and ref):
+            continue
+        await kb_entities.update_one(
+            {"project_id": project_id, "name": src, "type": "TABLE"},
+            {"$pull": {"fks": {"column": col, "ref_table": ref}}},
+        )
+        removed += 1
+
+    await audit_log.insert_one({
+        "action": "datamodel.er.apply",
+        "project_id": project_id,
+        "at": datetime.now(timezone.utc).isoformat(),
+        "details": {"added": added, "removed": removed},
+    })
+    return {"ok": True, "added": added, "removed": removed}
+
+
+@router.post("/jobs/start/oltp")
+async def start_oltp_job(payload: dict):
+    """Start OLTP generation as a background job. Returns {job_id} immediately so the
+    frontend can poll without being killed by K8s 60s ingress timeout."""
+    project_id = payload.get("project_id")
+    if not project_id:
+        raise HTTPException(400, "project_id required")
+    await require_stage_context(project_id, "Discovery", "DataModel")
+    model = payload.get("model") or "deepseek/deepseek-chat"
+    jid = _new_job(project_id, "oltp")
+    asyncio.create_task(_run_oltp_job(jid, project_id, model))
+    return {"job_id": jid, "status": "queued"}
+
+
 @router.post("/jobs/start/olap")
 async def start_olap_job(payload: dict):
     """Start OLAP generation as a background job. Returns {job_id} immediately."""
@@ -836,7 +1049,7 @@ async def data_model_chat(payload: dict):
     discovery_ctx = await require_stage_context(project_id, "Discovery", "DataModel")
     proj = await projects.find_one({"id": project_id}, {"_id": 0})
 
-    art_type = "olap_ddl" if model_type == "olap" else "oltp_ddl"
+    art_type = "olap_ddl" if model_type == "olap" else ("bus_matrix" if model_type == "bus" else "oltp_ddl")
     current_art = await data_models.find_one({"project_id": project_id, "type": art_type}, {"_id": 0})
     current_ddl = (current_art or {}).get("content", "")[:10000]
 
@@ -885,13 +1098,17 @@ async def data_model_chat(payload: dict):
         raise HTTPException(502, f"LLM failed: {e}")
 
     content = result.get("content", "") or ""
-    # Extract suggested DDL change
+    # Extract suggested changes — supports [DDL_CHANGE]/[BUS_CHANGE]/[ER_CHANGE] markers.
     suggested_ddl = None
-    if "[DDL_CHANGE]" in content and "[/DDL_CHANGE]" in content:
-        try:
-            suggested_ddl = content.split("[DDL_CHANGE]", 1)[1].split("[/DDL_CHANGE]", 1)[0].strip()
-        except Exception:
-            suggested_ddl = None
+    change_kind = None
+    for marker in ("DDL_CHANGE", "BUS_CHANGE", "ER_CHANGE"):
+        if f"[{marker}]" in content and f"[/{marker}]" in content:
+            try:
+                suggested_ddl = content.split(f"[{marker}]", 1)[1].split(f"[/{marker}]", 1)[0].strip()
+                change_kind = marker.replace("_CHANGE", "").lower()  # 'ddl' | 'bus' | 'er'
+                break
+            except Exception:
+                suggested_ddl = None
 
     assistant_msg = ChatMessage(
         conversation_id=conversation_id,
@@ -907,6 +1124,7 @@ async def data_model_chat(payload: dict):
         "conversation_id": conversation_id,
         "message": assistant_msg.model_dump(),
         "suggested_ddl": suggested_ddl,
+        "change_kind": change_kind,  # 'ddl' | 'bus' | 'er' | None
         "artifact_id": (current_art or {}).get("id"),
         "model_type": model_type,
     }

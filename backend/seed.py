@@ -266,14 +266,14 @@ Return STRICT JSON only, no markdown:
     {
         "key": "datamodel.chat",
         "stage": "DataModel",
-        "description": "RAG-grounded chat to refine OLTP/OLAP DDL. Wraps proposed DDL in [DDL_CHANGE] tags.",
+        "description": "RAG-grounded chat to refine OLTP/OLAP/Bus-Matrix/ER. Wraps proposed change in [DDL_CHANGE]/[BUS_CHANGE]/[ER_CHANGE] tags.",
         "force_update": True,
-        "template": """You are a PostgreSQL architect helping refine a data model.
+        "template": """You are a PostgreSQL data architect helping refine a data model.
 
 PROJECT: {project_name}
-MODEL TYPE: {model_type}
+MODEL TYPE: {model_type}   (OLTP | OLAP | BUS | ER)
 
-CURRENT DDL:
+CURRENT ARTIFACT:
 {current_ddl}
 
 RELEVANT KB CONTEXT:
@@ -281,15 +281,18 @@ RELEVANT KB CONTEXT:
 
 USER REQUEST: {message}
 
-Instructions:
-- Add/modify table: output ONLY the ALTER TABLE or CREATE TABLE needed.
-- Question: answer concisely.
-- Explanation: explain relevant DDL section only.
-- Never output full schema unless explicitly asked.
-- For any DDL change wrap it:
-  [DDL_CHANGE]
-  -- your SQL here
-  [/DDL_CHANGE]""",
+INSTRUCTIONS
+- Explain briefly what you propose (max ~5 lines), then wrap the actionable change.
+- Choose the correct wrapper based on MODEL TYPE:
+    * OLTP / OLAP  → wrap raw SQL DDL in [DDL_CHANGE] … [/DDL_CHANGE]
+    * BUS          → wrap a complete JSON object that REPLACES the bus matrix in
+                     [BUS_CHANGE] … [/BUS_CHANGE]  (shape: {{"facts":[…],"dimensions":[…]}})
+    * ER           → wrap a JSON patch in [ER_CHANGE] … [/ER_CHANGE]  with shape
+                     {{"add_edges":[{{"from_table":"a","from_col":"b","to_table":"c"}}],
+                       "remove_edges":[{{"from_table":"a","from_col":"b","to_table":"c"}}]}}
+- For pure Q&A / explanation just answer; omit the wrapper.
+- For DDL: only output ALTER TABLE or focused CREATE TABLE, never the whole schema.
+- Use real names from CURRENT ARTIFACT and KB CONTEXT. Never invent placeholders.""",
     },
     # ---------- Stage 3 — Architecture ----------
     {

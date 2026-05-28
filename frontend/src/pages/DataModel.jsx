@@ -28,6 +28,7 @@ import { useProjects } from "@/state/ProjectContext";
 import {
   API,
   generateOLTPUrl,
+  startOLTPJob,
   startOLAPJob,
   startScriptsJob,
   getDataModelJob,
@@ -39,6 +40,8 @@ import {
   freezeArtifact,
   downloadArtifactUrl,
   sendDataModelChat,
+  applyBusMatrixChange,
+  applyERChange,
   factoryReset,
   resetStage2,
 } from "@/lib/api";
@@ -427,6 +430,7 @@ function DataModelChatPanel({ projectId, onApplyDdl, currentOltp, currentOlap })
           role: "assistant",
           content: res.message?.content || "",
           suggested_ddl: res.suggested_ddl,
+          change_kind: res.change_kind || "ddl",
           model_type: res.model_type,
           ts: Date.now(),
         },
@@ -438,16 +442,24 @@ function DataModelChatPanel({ projectId, onApplyDdl, currentOltp, currentOlap })
     }
   };
 
-  const applyChange = async (ddl, target) => {
-    const targetArt = target === "oltp" ? currentOltp : currentOlap;
-    if (!targetArt) {
-      toast.error(`No ${target.toUpperCase()} artifact to apply to. Generate it first.`);
-      return;
-    }
-    const merged = `${(targetArt.content || "").trim()}\n\n-- [LAMA CHAT EDIT — ${new Date().toISOString()}]\n${ddl}\n`;
+  const applyChange = async (payload, target) => {
     try {
-      await updateArtifact(projectId, targetArt.id, merged);
-      toast.success(`Applied to ${target.toUpperCase()}`);
+      if (target === "bus") {
+        await applyBusMatrixChange(projectId, payload);
+        toast.success("Applied bus matrix change");
+      } else if (target === "er") {
+        const r = await applyERChange(projectId, payload);
+        toast.success(`Applied ER patch (+${r.added}, −${r.removed})`);
+      } else {
+        const targetArt = target === "oltp" ? currentOltp : currentOlap;
+        if (!targetArt) {
+          toast.error(`No ${target.toUpperCase()} artifact. Generate it first.`);
+          return;
+        }
+        const merged = `${(targetArt.content || "").trim()}\n\n-- [LAMA CHAT EDIT — ${new Date().toISOString()}]\n${payload}\n`;
+        await updateArtifact(projectId, targetArt.id, merged);
+        toast.success(`Applied to ${target.toUpperCase()}`);
+      }
       onApplyDdl?.();
     } catch (e) {
       toast.error("Apply failed", { description: e.response?.data?.detail || e.message });
@@ -459,7 +471,7 @@ function DataModelChatPanel({ projectId, onApplyDdl, currentOltp, currentOlap })
       <div className="px-3 py-2 border-b border-[#E6E6E6] flex items-center gap-2">
         <h3 className="font-display text-sm font-bold tracking-tight text-[#2E2E38]">Data Model Chat</h3>
         <div className="ml-auto flex gap-1 bg-[#F6F6FA] rounded-sm p-0.5">
-          {["oltp", "olap"].map((t) => (
+          {["oltp", "olap", "bus", "er"].map((t) => (
             <button
               key={t}
               type="button"
@@ -477,8 +489,10 @@ function DataModelChatPanel({ projectId, onApplyDdl, currentOltp, currentOlap })
       <div ref={scrollRef} className="flex-1 overflow-y-auto mos-scroll p-3 space-y-2 bg-[#F6F6FA]" data-testid="datamodel-chat-history">
         {history.length === 0 && (
           <div className="text-xs text-[#747480] text-center py-6">
-            Ask anything about the {modelType.toUpperCase()} schema. Suggest changes with{" "}
-            <span className="font-mono bg-white border border-[#E6E6E6] px-1 rounded">[DDL_CHANGE]…[/DDL_CHANGE]</span>.
+            Ask anything about the {modelType.toUpperCase()} {modelType === "bus" ? "matrix" : modelType === "er" ? "diagram" : "schema"}. Changes use{" "}
+            <span className="font-mono bg-white border border-[#E6E6E6] px-1 rounded">
+              {modelType === "bus" ? "[BUS_CHANGE]" : modelType === "er" ? "[ER_CHANGE]" : "[DDL_CHANGE]"}
+            </span>.
           </div>
         )}
         {history.map((m, i) => (
@@ -489,25 +503,47 @@ function DataModelChatPanel({ projectId, onApplyDdl, currentOltp, currentOlap })
               <div>{m.content}</div>
               {m.suggested_ddl && (
                 <div className="mt-2 bg-[#FFFCE6] border border-[#FFE600] rounded-sm p-2" data-testid={`suggested-ddl-${i}`}>
-                  <div className="text-[10px] uppercase tracking-wider text-[#2E2E38] font-semibold mb-1">Suggested DDL Change</div>
-                  <pre className="text-[11px] font-mono whitespace-pre-wrap text-[#2E2E38] mb-2">{m.suggested_ddl}</pre>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => applyChange(m.suggested_ddl, "oltp")}
-                      data-testid={`apply-oltp-${i}`}
-                      className="text-[10px] bg-[#FFE600] text-[#2E2E38] px-2 py-1 rounded-sm font-semibold hover:bg-[#FFD700]"
-                    >
-                      Apply to OLTP
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyChange(m.suggested_ddl, "olap")}
-                      data-testid={`apply-olap-${i}`}
-                      className="text-[10px] bg-[#FFE600] text-[#2E2E38] px-2 py-1 rounded-sm font-semibold hover:bg-[#FFD700]"
-                    >
-                      Apply to OLAP
-                    </button>
+                  <div className="text-[10px] uppercase tracking-wider text-[#2E2E38] font-semibold mb-1">
+                    {m.change_kind === "bus" ? "Suggested Bus-Matrix Change"
+                      : m.change_kind === "er" ? "Suggested ER Patch"
+                      : "Suggested DDL Change"}
+                  </div>
+                  <pre className="text-[11px] font-mono whitespace-pre-wrap text-[#2E2E38] mb-2 max-h-64 overflow-auto">{m.suggested_ddl}</pre>
+                  <div className="flex flex-wrap gap-1">
+                    {m.change_kind === "bus" ? (
+                      <button
+                        type="button"
+                        onClick={() => applyChange(m.suggested_ddl, "bus")}
+                        data-testid={`apply-bus-${i}`}
+                        className="text-[10px] bg-[#FFE600] text-[#2E2E38] px-2 py-1 rounded-sm font-semibold hover:bg-[#FFD700]">
+                        Apply Bus Matrix
+                      </button>
+                    ) : m.change_kind === "er" ? (
+                      <button
+                        type="button"
+                        onClick={() => applyChange(m.suggested_ddl, "er")}
+                        data-testid={`apply-er-${i}`}
+                        className="text-[10px] bg-[#FFE600] text-[#2E2E38] px-2 py-1 rounded-sm font-semibold hover:bg-[#FFD700]">
+                        Apply ER Patch
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => applyChange(m.suggested_ddl, "oltp")}
+                          data-testid={`apply-oltp-${i}`}
+                          className="text-[10px] bg-[#FFE600] text-[#2E2E38] px-2 py-1 rounded-sm font-semibold hover:bg-[#FFD700]">
+                          Apply to OLTP
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyChange(m.suggested_ddl, "olap")}
+                          data-testid={`apply-olap-${i}`}
+                          className="text-[10px] bg-[#FFE600] text-[#2E2E38] px-2 py-1 rounded-sm font-semibold hover:bg-[#FFD700]">
+                          Apply to OLAP
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -770,19 +806,18 @@ export default function DataModelPage() {
     setOltpGenerating(true);
     setOltpLog({ step: "Starting…", pct: 0 });
     try {
-      await runSse(generateOLTPUrl(), { project_id: active.id }, (data) => {
-        if (data.type === "progress" || data.type === "start") {
-          setOltpLog({ step: data.step || data.message, pct: data.pct || 10 });
-        } else if (data.type === "complete") {
-          toast.success(`OLTP DDL generated (${data.tables} tables, ${data.fks} FKs)`);
-          setOltpLog(null);
-        } else if (data.type === "error") {
-          toast.error("OLTP generation failed", { description: data.message });
-        }
+      const { job_id } = await startOLTPJob(active.id);
+      const final = await pollJob(job_id, (j) => {
+        setOltpLog({ step: j.step || "Running…", pct: j.pct || 0 });
       });
+      if (final.status === "complete") {
+        toast.success(`OLTP DDL generated (${final.result.tables} tables, ${final.result.fks} FKs)`);
+      } else {
+        toast.error("OLTP generation failed", { description: final.error || "Unknown error" });
+      }
       await loadArtifacts();
     } catch (e) {
-      toast.error("OLTP generation failed", { description: e.message });
+      toast.error("OLTP generation failed", { description: e.response?.data?.detail || e.message });
     } finally {
       setOltpGenerating(false);
       setOltpLog(null);
