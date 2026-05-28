@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { Link } from "react-router-dom";
 import {
   ArrowLeft, Loader2, Network, ListTree, Search, Download,
-  ZoomIn, ZoomOut, RotateCcw, Filter, Boxes, RefreshCw,
+  ZoomIn, ZoomOut, RotateCcw, Filter, Boxes, RefreshCw, X,
   Users, Database, FileCode, Tag, Building2, AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -33,55 +33,95 @@ function paletteForDomains(domains) {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Force-directed layout (kept lightweight — business ontologies are
-// typically 15-40 entities so iter=60 stays well under 100ms.)
+// Domain-clustered layout: each domain becomes a cluster; entities arrange
+// in a circle around the cluster centre. Cross-domain edges become long
+// curved lines, intra-domain edges stay short. Far more readable than a
+// raw force layout on small graphs.
 // ────────────────────────────────────────────────────────────────────
-function forceLayout(nodes, edges, { width = 1400, height = 900, iter = 60 } = {}) {
-  if (!nodes.length) return [];
-  const N = nodes.length;
-  if (N > 200) iter = 30;
-  const k = Math.sqrt((width * height) / N) * 0.85;
-  const positioned = nodes.map((n) => ({
-    ...n,
-    x: width / 2 + (Math.random() - 0.5) * width * 0.6,
-    y: height / 2 + (Math.random() - 0.5) * height * 0.6,
-    dx: 0, dy: 0,
-  }));
-  const byId = Object.fromEntries(positioned.map((n) => [n.id, n]));
-  let t = width / 10;
-  for (let step = 0; step < iter; step++) {
-    for (const a of positioned) { a.dx = 0; a.dy = 0; }
-    for (let i = 0; i < N; i++) {
-      for (let j = i + 1; j < N; j++) {
-        const a = positioned[i], b = positioned[j];
-        const dx = a.x - b.x, dy = a.y - b.y;
-        const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const f = (k * k) / d;
-        const fx = (dx / d) * f, fy = (dy / d) * f;
-        a.dx += fx; a.dy += fy;
-        b.dx -= fx; b.dy -= fy;
-      }
-    }
-    for (const e of edges) {
-      const a = byId[e.source], b = byId[e.target];
-      if (!a || !b) continue;
-      const dx = a.x - b.x, dy = a.y - b.y;
-      const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-      const f = (d * d) / k;
-      const fx = (dx / d) * f, fy = (dy / d) * f;
-      a.dx -= fx; a.dy -= fy;
-      b.dx += fx; b.dy += fy;
-    }
-    for (const a of positioned) {
-      const disp = Math.sqrt(a.dx * a.dx + a.dy * a.dy) || 0.01;
-      a.x += (a.dx / disp) * Math.min(disp, t);
-      a.y += (a.dy / disp) * Math.min(disp, t);
-      a.x = Math.max(80, Math.min(width - 80, a.x));
-      a.y = Math.max(60, Math.min(height - 60, a.y));
-    }
-    t = Math.max(t * 0.9, 1);
+const W = 2400;
+const H = 1600;
+
+function clusteredLayout(entities, relationships, domains) {
+  if (!entities.length) return { nodes: [], domainPositions: {} };
+
+  // Per-domain bucketing first so we know cluster sizes before placing centres.
+  const buckets = {};
+  for (const e of entities) {
+    buckets[e.domain] = buckets[e.domain] || [];
+    buckets[e.domain].push(e);
   }
-  return positioned;
+  const usedDomains = domains.filter((d) => buckets[d] && buckets[d].length > 0);
+  const D = usedDomains.length || 1;
+
+  // Cluster radii based on member counts.
+  const clusterRadius = {};
+  for (const d of usedDomains) {
+    const n = buckets[d].length;
+    if (n === 1)      clusterRadius[d] = 60;
+    else if (n <= 4)  clusterRadius[d] = 150;
+    else if (n <= 8)  clusterRadius[d] = 230;
+    else              clusterRadius[d] = 310;
+  }
+  // Outer ring big enough that the biggest two halos can't touch each other.
+  const maxR = Math.max(...Object.values(clusterRadius), 120);
+  const ringR = Math.max(W, H) * 0.36 + maxR * 0.25;
+  const cx = W / 2;
+  const cy = H / 2;
+
+  const domainPositions = {};
+  usedDomains.forEach((d, i) => {
+    if (D === 1) {
+      domainPositions[d] = { cx, cy, r: clusterRadius[d] };
+      return;
+    }
+    const angle = (2 * Math.PI * i) / D - Math.PI / 2;
+    domainPositions[d] = {
+      cx: cx + ringR * Math.cos(angle),
+      cy: cy + ringR * Math.sin(angle),
+      r:  clusterRadius[d],
+    };
+  });
+
+  // Place entities inside each cluster, most-connected ones to centre.
+  const degree = {};
+  for (const r of relationships) {
+    degree[r.source] = (degree[r.source] || 0) + 1;
+    degree[r.target] = (degree[r.target] || 0) + 1;
+  }
+
+  const placed = [];
+  for (const d of usedDomains) {
+    const pos = domainPositions[d];
+    const list = [...buckets[d]].sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0));
+    const n = list.length;
+    if (n === 1) {
+      placed.push({ ...list[0], x: pos.cx, y: pos.cy });
+    } else if (n === 2) {
+      placed.push({ ...list[0], x: pos.cx - 90, y: pos.cy });
+      placed.push({ ...list[1], x: pos.cx + 90, y: pos.cy });
+    } else {
+      const r = pos.r - 30;
+      list.forEach((e, i) => {
+        const a = (2 * Math.PI * i) / n - Math.PI / 2;
+        placed.push({ ...e, x: pos.cx + r * Math.cos(a), y: pos.cy + r * Math.sin(a) });
+      });
+    }
+  }
+  return { nodes: placed, domainPositions };
+}
+
+// Quadratic bezier path between two points, curved away from the chord centre.
+function bezierPath(ax, ay, bx, by, curve = 0.18) {
+  const mx = (ax + bx) / 2;
+  const my = (ay + by) / 2;
+  // perpendicular offset
+  const dx = bx - ax;
+  const dy = by - ay;
+  const ox = -dy * curve;
+  const oy = dx * curve;
+  const px = mx + ox;
+  const py = my + oy;
+  return { d: `M${ax},${ay} Q${px},${py} ${bx},${by}`, lx: px, ly: py };
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -91,6 +131,7 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
   const svgRef = useRef(null);
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
   const dragRef = useRef(null);
+  const [hoverId, setHoverId] = useState(null);
 
   const filteredEntities = useMemo(() => entities.filter((e) =>
     activeDomains.has(e.domain) &&
@@ -98,16 +139,30 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
               || (e.description || "").toLowerCase().includes(search.toLowerCase()))
   ), [entities, activeDomains, search]);
 
+  const activeDomainList = useMemo(
+    () => Array.from(new Set(filteredEntities.map((e) => e.domain))),
+    [filteredEntities]
+  );
+
   const visibleIds = useMemo(() => new Set(filteredEntities.map((n) => n.id)), [filteredEntities]);
   const filteredRels = useMemo(() => relationships.filter(
     (r) => visibleIds.has(r.source) && visibleIds.has(r.target)
   ), [relationships, visibleIds]);
 
-  const positioned = useMemo(
-    () => forceLayout(filteredEntities, filteredRels, { width: 1600, height: 1100 }),
-    [filteredEntities, filteredRels]
+  const { nodes: positioned, domainPositions } = useMemo(
+    () => clusteredLayout(filteredEntities, filteredRels, activeDomainList),
+    [filteredEntities, filteredRels, activeDomainList]
   );
   const byId = useMemo(() => Object.fromEntries(positioned.map((n) => [n.id, n])), [positioned]);
+
+  // Auto fit-to-view whenever node set changes meaningfully
+  const lastFitKey = useRef("");
+  useEffect(() => {
+    const key = `${positioned.length}-${activeDomainList.join("|")}`;
+    if (positioned.length === 0 || key === lastFitKey.current) return;
+    lastFitKey.current = key;
+    setView({ scale: 1, tx: 0, ty: 0 });
+  }, [positioned, activeDomainList]);
 
   const onWheel = useCallback((e) => {
     e.preventDefault();
@@ -129,12 +184,13 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
   };
   const onMouseUp = () => { dragRef.current = null; };
 
-  const isHighlighted = (nid) => {
-    if (!selected) return true;
-    if (nid === selected) return true;
+  const focusId = selected || hoverId;
+  const isFocused = (nid) => {
+    if (!focusId) return true;
+    if (nid === focusId) return true;
     return filteredRels.some((r) =>
-      (r.source === selected && r.target === nid) ||
-      (r.target === selected && r.source === nid)
+      (r.source === focusId && r.target === nid) ||
+      (r.target === focusId && r.source === nid)
     );
   };
 
@@ -151,7 +207,8 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
       <svg
         ref={svgRef}
         width="100%" height="100%"
-        viewBox="0 0 1600 1100"
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="xMidYMid meet"
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -160,59 +217,118 @@ function GraphView({ entities, relationships, search, activeDomains, palette, on
         style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
       >
         <defs>
-          <marker id="biz-arrow" viewBox="0 -5 10 10" refX="22" refY="0" markerWidth="7" markerHeight="7" orient="auto">
+          <marker id="biz-arrow" viewBox="0 -5 10 10" refX="10" refY="0" markerWidth="8" markerHeight="8" orient="auto">
             <path d="M0,-5L10,0L0,5" fill="#2E2E38" />
           </marker>
-          <marker id="biz-arrow-fk" viewBox="0 -5 10 10" refX="22" refY="0" markerWidth="7" markerHeight="7" orient="auto">
+          <marker id="biz-arrow-fk" viewBox="0 -5 10 10" refX="10" refY="0" markerWidth="8" markerHeight="8" orient="auto">
             <path d="M0,-5L10,0L0,5" fill="#9CA3AF" />
           </marker>
+          <filter id="card-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" floodOpacity="0.12" />
+          </filter>
         </defs>
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.scale})`}>
+          {/* Domain halos */}
+          {Object.entries(domainPositions).map(([dom, pos]) => {
+            const meta = palette[dom] || DOMAIN_PALETTE[0];
+            const memberCount = positioned.filter((n) => n.domain === dom).length;
+            const r = pos.r + 40;
+            return (
+              <g key={`halo-${dom}`}>
+                <circle cx={pos.cx} cy={pos.cy} r={r}
+                  fill={meta.bg} fillOpacity={0.45}
+                  stroke={meta.border} strokeOpacity={0.5}
+                  strokeDasharray="6 5" strokeWidth={1.3} />
+                <rect x={pos.cx - 110} y={pos.cy - r - 32}
+                  width={220} height={26} rx={13} ry={13}
+                  fill={meta.border} />
+                <text x={pos.cx} y={pos.cy - r - 14}
+                  textAnchor="middle" fontSize={14} fontWeight={800}
+                  fill="white" style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  {dom}
+                </text>
+                <text x={pos.cx} y={pos.cy - r + 2}
+                  textAnchor="middle" fontSize={11} fontWeight={600}
+                  fill={meta.color} opacity={0.75}>
+                  {memberCount} {memberCount === 1 ? "entity" : "entities"}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Edges (curved) */}
           {filteredRels.map((r, i) => {
             const a = byId[r.source], b = byId[r.target];
             if (!a || !b) return null;
-            const dim = selected && !(a.id === selected || b.id === selected);
+            const dim = focusId && !(a.id === focusId || b.id === focusId);
             const isFk = (r.kind || "business") === "fk";
-            // Midpoint label
-            const mx = (a.x + b.x) / 2;
-            const my = (a.y + b.y) / 2;
+            // Curve more when both endpoints are in the same domain (avoid overlap with halo).
+            const sameDomain = a.domain === b.domain;
+            const { d, lx, ly } = bezierPath(a.x, a.y, b.x, b.y, sameDomain ? 0.32 : 0.16);
             return (
-              <g key={`r${i}`} opacity={dim ? 0.15 : 0.9}>
-                <line
-                  x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+              <g key={`r${i}`} opacity={dim ? 0.1 : 1}>
+                <path d={d} fill="none"
                   stroke={isFk ? "#9CA3AF" : "#2E2E38"}
-                  strokeWidth={isFk ? 1 : 1.6}
-                  strokeDasharray={isFk ? "4 3" : ""}
-                  markerEnd={isFk ? "url(#biz-arrow-fk)" : "url(#biz-arrow)"}
-                />
-                {r.verb && !dim && (
-                  <text x={mx} y={my - 4} textAnchor="middle" fontSize={9}
-                    fill={isFk ? "#9CA3AF" : "#2E2E38"}
-                    style={{ paintOrder: "stroke", stroke: "#FAFAFC", strokeWidth: 3, strokeLinejoin: "round" }}>
-                    {r.verb}
-                  </text>
+                  strokeWidth={isFk ? 1.2 : 1.8}
+                  strokeDasharray={isFk ? "5 4" : ""}
+                  markerEnd={isFk ? "url(#biz-arrow-fk)" : "url(#biz-arrow)"} />
+                {r.verb && (
+                  <g>
+                    <rect x={lx - r.verb.length * 3.5 - 4} y={ly - 9} rx={3} ry={3}
+                      width={r.verb.length * 7 + 8} height={16}
+                      fill="white" stroke={isFk ? "#E6E6E6" : "#D1D5DB"} strokeWidth={0.8} />
+                    <text x={lx} y={ly + 2.5} textAnchor="middle"
+                      fontSize={10} fontWeight={600}
+                      fill={isFk ? "#6B7280" : "#2E2E38"}
+                      style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      {r.verb}
+                    </text>
+                  </g>
                 )}
               </g>
             );
           })}
+
+          {/* Entity cards */}
           {positioned.map((n) => {
             const meta = palette[n.domain] || DOMAIN_PALETTE[0];
-            const w = Math.max(80, Math.min(160, (n.name || "").length * 7 + 24));
-            const h = 30;
-            const hl = isHighlighted(n.id);
+            const w = Math.max(140, Math.min(220, (n.name || "").length * 9 + 36));
+            const h = 52;
+            const focused = isFocused(n.id);
             const isSel = n.id === selected;
+            const tblCount = (n.backed_by_tables || []).length;
+            const clsCount = (n.implemented_in_classes || []).length;
             return (
               <g key={n.id} data-node={n.id}
                  onClick={(e) => { e.stopPropagation(); onSelect(n); }}
+                 onMouseEnter={() => setHoverId(n.id)}
+                 onMouseLeave={() => setHoverId(null)}
                  style={{ cursor: "pointer" }}
-                 opacity={hl ? 1 : 0.25}>
+                 opacity={focused ? 1 : 0.22}>
+                {/* Card shadow */}
                 <rect x={n.x - w / 2} y={n.y - h / 2}
-                  rx={6} ry={6} width={w} height={h}
-                  fill={meta.bg} stroke={meta.border}
-                  strokeWidth={isSel ? 3 : 1.4} />
-                <text x={n.x} y={n.y + 4} textAnchor="middle"
-                  fontSize={11} fontWeight={600} fill={meta.color}>
-                  {(n.name || "").length > 22 ? (n.name || "").slice(0, 22) + "…" : n.name}
+                  rx={10} ry={10} width={w} height={h}
+                  fill="white"
+                  stroke={isSel ? meta.border : "#E6E6E6"}
+                  strokeWidth={isSel ? 3 : 1.2}
+                  filter="url(#card-shadow)" />
+                {/* Left color stripe */}
+                <rect x={n.x - w / 2} y={n.y - h / 2}
+                  width={6} height={h} rx={3} ry={3}
+                  fill={meta.border} />
+                {/* Name */}
+                <text x={n.x - w / 2 + 14} y={n.y - 4}
+                  fontSize={13} fontWeight={700} fill="#2E2E38">
+                  {(n.name || "").length > 18 ? (n.name || "").slice(0, 18) + "…" : n.name}
+                </text>
+                {/* Stats row */}
+                <text x={n.x - w / 2 + 14} y={n.y + 14}
+                  fontSize={9.5} fill="#747480"
+                  style={{ letterSpacing: "0.02em" }}>
+                  {tblCount > 0 && <tspan>{tblCount} table{tblCount !== 1 ? "s" : ""}</tspan>}
+                  {tblCount > 0 && clsCount > 0 && <tspan>  ·  </tspan>}
+                  {clsCount > 0 && <tspan>{clsCount} class{clsCount !== 1 ? "es" : ""}</tspan>}
+                  {tblCount === 0 && clsCount === 0 && <tspan>—</tspan>}
                 </text>
               </g>
             );
@@ -638,14 +754,14 @@ export default function OntologyStudioPage() {
           </div>
         ) : (
           <>
-            <div className="col-span-3 min-w-0 overflow-hidden border-r border-[#E6E6E6]">
+            <div className="col-span-2 min-w-0 overflow-hidden border-r border-[#E6E6E6]">
               <TreeView
                 entities={data.entities || []}
                 search={search} activeDomains={activeDomains} palette={palette}
                 selected={selectedId} onSelect={(e) => setSelectedId(e.id)}
               />
             </div>
-            <div className="col-span-6 min-w-0 overflow-hidden">
+            <div className={`${selected ? "col-span-7" : "col-span-10"} min-w-0 overflow-hidden`}>
               {mode === "graph" ? (
                 <GraphView
                   entities={data.entities || []} relationships={data.relationships || []}
@@ -660,10 +776,17 @@ export default function OntologyStudioPage() {
                 />
               )}
             </div>
-            <div className="col-span-3 min-w-0 overflow-hidden border-l border-[#E6E6E6]">
-              <DetailPanel entity={selected} relationships={data.relationships || []}
-                byId={byId} palette={palette} onSelect={(e) => setSelectedId(e.id)} />
-            </div>
+            {selected && (
+              <div className="col-span-3 min-w-0 overflow-hidden border-l border-[#E6E6E6] relative">
+                <button onClick={() => setSelectedId(null)}
+                  data-testid="detail-close"
+                  className="absolute top-2 right-2 z-10 text-[#747480] hover:text-[#2E2E38] bg-white border border-[#E6E6E6] rounded-sm p-0.5">
+                  <X className="w-3 h-3" />
+                </button>
+                <DetailPanel entity={selected} relationships={data.relationships || []}
+                  byId={byId} palette={palette} onSelect={(e) => setSelectedId(e.id)} />
+              </div>
+            )}
           </>
         )}
       </div>
