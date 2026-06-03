@@ -200,6 +200,9 @@ async def _gen_one_file(project_id: str, svc: dict, file_def: dict, model: str, 
         r = await chat_completion(
             messages=[{"role": "system", "content": sp},
                       {"role": "user", "content": f"Generate {file_def['path']} now."}],
+            agent_key=("codegen.frontend" if (svc.get("frontend_only") or file_def.get("type","").startswith("frontend"))
+                       else "codegen.service"),
+            project_id=project_id,
             model=model, temperature=0.2, max_tokens=4500, timeout=180.0,
         )
         return _strip_md_fence(r.get("content", "")) or f"// LAMA: empty content for {file_def['path']}"
@@ -525,6 +528,8 @@ async def codegen_chat(payload: dict):
     try:
         r = await chat_completion(
             messages=[{"role": "system", "content": sp}, {"role": "user", "content": message}],
+            agent_key="codegen.chat",
+            project_id=project_id,
             model=model, temperature=0.15, max_tokens=6000, timeout=180.0,
         )
     except Exception as e:

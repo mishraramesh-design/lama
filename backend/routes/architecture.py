@@ -178,6 +178,8 @@ async def _run_recommend_job(jid: str, project_id: str, model: str, override_mes
         gen_task = asyncio.create_task(
             chat_completion(
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_msg}],
+                agent_key="arch.recommend",
+                project_id=project_id,
                 model=model, temperature=0.2, max_tokens=8000, timeout=240.0,
             )
         )
@@ -409,6 +411,8 @@ async def _run_hld_job(jid: str, project_id: str, model: str):
                     r = await chat_completion(
                         messages=[{"role": "system", "content": system_prompt},
                                   {"role": "user", "content": f"Write the {label} section now."}],
+                        agent_key="arch.hld",
+                        project_id=project_id,
                         model=model, temperature=0.2, max_tokens=4000, timeout=180.0,
                     )
                     section_md = (r.get("content", "") or "").strip()
@@ -508,6 +512,8 @@ async def _run_lld_job(jid: str, project_id: str, model: str):
                     r = await chat_completion(
                         messages=[{"role": "system", "content": sp},
                                   {"role": "user", "content": f"Write the LLD for {svc['name']} now."}],
+                        agent_key="arch.lld",
+                        project_id=project_id,
                         model=model, temperature=0.2, max_tokens=6000, timeout=200.0,
                     )
                     content = (r.get("content", "") or "").strip()
@@ -598,6 +604,8 @@ async def _run_seq_job(jid: str, project_id: str, model: str):
                     r = await chat_completion(
                         messages=[{"role": "system", "content": sp},
                                   {"role": "user", "content": "Generate the mermaid sequenceDiagram now."}],
+                        agent_key="arch.sequence",
+                        project_id=project_id,
                         model=model, temperature=0.2, max_tokens=2500, timeout=120.0,
                     )
                     content = (r.get("content", "") or "").strip()
@@ -694,6 +702,8 @@ async def arch_chat(payload: dict):
     try:
         r = await chat_completion(
             messages=[{"role": "system", "content": sp}, {"role": "user", "content": message}],
+            agent_key="arch.chat",
+            project_id=project_id,
             model=model, temperature=0.2, max_tokens=4000, timeout=120.0,
         )
     except Exception as e:

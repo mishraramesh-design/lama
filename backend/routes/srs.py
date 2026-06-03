@@ -463,6 +463,8 @@ Return only the markdown content. No JSON. No preamble."""
         try:
             result = await chat_completion(
                 messages=llm_msgs,
+                agent_key="srs.generate",
+                project_id=project_id or "",
                 model=model,
                 temperature=0.2 if attempt == 0 else 0.4,
                 max_tokens=max_tokens,
