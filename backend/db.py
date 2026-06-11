@@ -48,3 +48,5 @@ living_artifacts = db.living_artifacts
 living_runs = db.living_runs
 ontology_snapshots = db.ontology_snapshots
 business_ontologies = db.business_ontologies
+india_stack_selections = db.india_stack_selections
+india_stack_usage = db.india_stack_usage

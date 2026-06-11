@@ -15,6 +15,7 @@ import StagePlaceholderPage from "@/pages/StagePlaceholder";
 import PromptLibraryPage from "@/pages/PromptLibrary";
 import AuditLogPage from "@/pages/AuditLog";
 import GitHubSettingsPage from "@/pages/GitHubSettings";
+import IndiaStackPage from "@/pages/IndiaStack";
 
 function Shell({ children }) {
   return (
@@ -41,6 +42,7 @@ function App() {
           <Route path="/ontology-studio" element={<Shell><OntologyStudioPage /></Shell>} />
           <Route path="/settings" element={<Shell><GitHubSettingsPage /></Shell>} />
           <Route path="/audit" element={<Shell><AuditLogPage /></Shell>} />
+          <Route path="/india-stack" element={<Shell><IndiaStackPage /></Shell>} />
         </Routes>
       </BrowserRouter>
     </ProjectProvider>

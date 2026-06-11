@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import MiniConsole from "@/components/MiniConsole";
+import LivingIndiaStackPanel from "@/components/LivingIndiaStackPanel";
 
 const TABS = [
   { id: "selenium", label: "Selenium Tests", icon: FlaskConical },
@@ -359,6 +360,10 @@ export default function LivingPage() {
         </div>
 
         <ArtifactPanel kind={tab} artifact={activeArtifact} projectId={projectId} onRefresh={refresh} />
+      </div>
+
+      <div className="px-4 pb-4">
+        <LivingIndiaStackPanel projectId={projectId} />
       </div>
 
       <ResetModal open={resetOpen} onClose={() => setResetOpen(false)} onConfirm={onReset} />

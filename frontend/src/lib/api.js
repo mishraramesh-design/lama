@@ -179,6 +179,20 @@ export const startBusinessOntologyJob = (projectId, force = false) =>
 export const getBusinessOntologyJob = (projectId, jobId) =>
   api.get(`/kb/${projectId}/business-ontology/jobs/${jobId}`).then((r) => r.data);
 
+// India Stack (Architecture-stage palette + CodeGen + Living)
+export const getIndiaStackCatalog = () =>
+  api.get("/india-stack/catalog").then((r) => r.data);
+export const getIndiaStackSelections = (projectId) =>
+  api.get(`/india-stack/${projectId}/selections`).then((r) => r.data);
+export const saveIndiaStackSelections = (projectId, selections) =>
+  api.put(`/india-stack/${projectId}/selections`, { selections }).then((r) => r.data);
+export const generateIndiaStackCode = (projectId) =>
+  api.post(`/india-stack/${projectId}/generate`).then((r) => r.data);
+export const getIndiaStackLiving = (projectId) =>
+  api.get(`/india-stack/${projectId}/living`).then((r) => r.data);
+export const getIndiaStackServices = (projectId) =>
+  api.get(`/india-stack/${projectId}/services`).then((r) => r.data);
+
 // Living — Stage 5
 export const startLivingJob = (kind, projectId, extra = {}) =>
   api.post(`/living/jobs/start/${kind}`, { project_id: projectId, ...extra }).then((r) => r.data);

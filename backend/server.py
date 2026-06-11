@@ -23,6 +23,7 @@ from routes.architecture import router as architecture_router  # noqa: E402
 from routes.codegen import router as codegen_router  # noqa: E402
 from routes.living import router as living_router  # noqa: E402
 from routes.console import router as console_router  # noqa: E402
+from routes.india_stack import router as india_stack_router  # noqa: E402
 from seed import run_seed  # noqa: E402
 
 
@@ -54,6 +55,7 @@ api_router.include_router(architecture_router)
 api_router.include_router(codegen_router)
 api_router.include_router(living_router)
 api_router.include_router(console_router)
+api_router.include_router(india_stack_router)
 
 app.include_router(api_router)
 

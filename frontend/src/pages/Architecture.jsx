@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -450,6 +450,10 @@ export default function ArchitecturePage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-[#747480]">{services.length} services · {artifacts.length} artifacts</span>
+          <Link to="/india-stack" data-testid="open-india-stack"
+            className="text-xs px-2 py-1 border border-[#FFE600] bg-[#FFFCE6] text-[#2E2E38] rounded-sm flex items-center gap-1 hover:bg-[#FFE600] font-bold">
+            🇮🇳 India Stack
+          </Link>
           {isFrozen && <span className="text-[10px] uppercase font-bold bg-[#FFE600] text-[#2E2E38] px-2 py-0.5 rounded-sm">Frozen</span>}
           <button onClick={() => setResetOpen(true)} data-testid="arch-reset-btn" className="text-xs px-2 py-1 border border-orange-300 text-orange-700 rounded-sm flex items-center gap-1 hover:bg-orange-50">
             <RotateCcw className="w-3 h-3" /> Reset
